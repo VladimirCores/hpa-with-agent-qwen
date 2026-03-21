@@ -34,13 +34,13 @@ After VMs are running, this step covers:
 
 ### Components Installed
 
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| Talos | latest | Kubernetes OS |
-| Kubernetes | bundled by Talos | Container orchestration |
-| Flannel CNI | latest | Pod networking |
-| metrics-server | latest | Resource metrics API |
-| kube-proxy | bundled | Service networking |
+| Component      | Version          | Purpose                 |
+| -------------- | ---------------- | ----------------------- |
+| Talos          | latest           | Kubernetes OS           |
+| Kubernetes     | bundled by Talos | Container orchestration |
+| Flannel CNI    | latest           | Pod networking          |
+| metrics-server | latest           | Resource metrics API    |
+| kube-proxy     | bundled          | Service networking      |
 
 > **Note:** Istio with Envoy Gateway will be added in the next step using Helm.
 
@@ -81,22 +81,22 @@ kubectl version --client
 
 The following variables from `.env` are used:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLUSTER_NAME` | talos-cluster | Cluster identifier |
-| `MASTER_IP` | 10.0.0.10 | Master node IP |
-| `WORKER_COUNT` | 2 | Number of worker nodes |
-| `WORKER_IP_BASE` | 10.0.0.11 | First worker IP |
+| Variable         | Default       | Description            |
+| ---------------- | ------------- | ---------------------- |
+| `CLUSTER_NAME`   | talos-cluster | Cluster identifier     |
+| `MASTER_IP`      | 10.0.0.10     | Master node IP         |
+| `WORKER_COUNT`   | 2             | Number of worker nodes |
+| `WORKER_IP_BASE` | 10.0.0.11     | First worker IP        |
 
 ### Machine Configuration Types
 
 Talos uses three configuration types:
 
-| Type | Role | Description |
-|------|------|-------------|
-| `controlplane` | Master | Runs control plane components |
-| `init` | First Master | Initializes the cluster (first control plane node) |
-| `worker` | Worker | Runs only worker components |
+| Type           | Role         | Description                                        |
+| -------------- | ------------ | -------------------------------------------------- |
+| `controlplane` | Master       | Runs control plane components                      |
+| `init`         | First Master | Initializes the cluster (first control plane node) |
+| `worker`       | Worker       | Runs only worker components                        |
 
 ## Usage
 
@@ -129,6 +129,7 @@ talosctl gen config $CLUSTER_NAME https://$MASTER_IP:6443 \
 ```
 
 This generates:
+
 - `controlplane.yaml` - For master nodes
 - `worker.yaml` - For worker nodes
 - `talosconfig` - Client configuration
@@ -142,6 +143,37 @@ talosctl wait --nodes 10.0.0.10
 # Apply control plane configuration
 talosctl apply-config --nodes 10.0.0.10 \
   --file _cluster-configs/controlplane.yaml
+```
+
+> **Note for Talos 1.12+**: After applying the config, there's a known certificate mismatch issue when bootstrapping. See "Troubleshooting" below for the workaround.
+
+#### Bootstrap Workaround (Talos 1.12+)
+
+Due to a certificate mismatch between the generated `talosconfig` and the node's actual CA after config apply, bootstrap may fail. To fix this:
+
+```bash
+# Extract certs from controlplane.yaml (requires yq)
+CA_CRT=$(yq -r '.machine.ca.crt' _cluster-configs/controlplane.yaml)
+ADMIN_CRT=$(yq -r '.machine.kubeadm.admin.crt' _cluster-configs/controlplane.yaml)
+ADMIN_KEY=$(yq -r '.machine.kubeadm.admin.key' _cluster-configs/controlplane.yaml)
+
+# Create talosconfig with correct certs
+cat > _cluster-configs/talosconfig <<EOF
+context: talos-cluster
+contexts:
+    talos-cluster:
+        endpoints:
+            - 10.0.0.10
+        nodes:
+            - 10.0.0.10
+        ca: $CA_CRT
+        crt: $ADMIN_CRT
+        key: $ADMIN_KEY
+EOF
+
+# Now bootstrap
+talosctl bootstrap --nodes 10.0.0.10 \
+  --talosconfig _cluster-configs/talosconfig
 ```
 
 #### Step 3: Apply Configuration to Workers
@@ -201,6 +233,7 @@ The bootstrap script performs:
 7. **Verify** - Checks cluster health
 
 Usage:
+
 ```bash
 # Full bootstrap
 ./scripts/talos-bootstrap.sh
@@ -222,6 +255,7 @@ Installs general Kubernetes components:
 4. **kube-proxy** - Service networking (already in Talos)
 
 Usage:
+
 ```bash
 # Install all components
 ./scripts/k8s-components.sh
