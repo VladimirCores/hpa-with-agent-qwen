@@ -154,7 +154,7 @@ if [[ -f "$CONFIG_DIR/controlplane.yaml" ]] && [[ -f "$CONFIG_DIR/worker.yaml" ]
     echo "    - worker.yaml"
     echo "    - talosconfig"
 
-    # Fix endpoints in talosconfig (gen config leaves them empty)
+    # Set endpoints in talosconfig (gen config leaves them empty)
     echo "  Setting endpoints in talosconfig..."
     talosctl config endpoint "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"
     talosctl config node "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"
@@ -204,9 +204,9 @@ done
 echo ""
 
 # =============================================================================
-# Step 4: Apply configurations
+# Step 4: Apply configurations and bootstrap
 # =============================================================================
-echo "[4/7] Applying configurations..."
+echo "[4/7] Applying configurations and bootstrapping..."
 
 # Apply to master (use --insecure for pre-bootstrap connection)
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
@@ -214,6 +214,15 @@ talosctl apply-config --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
     --file "$CONFIG_DIR/controlplane.yaml" \
     --insecure
 echo "  ✓ Controlplane config applied"
+
+# Note: Bootstrap requires talosconfig with matching certs
+# After apply-config, node has new CA from controlplane.yaml
+# The generated talosconfig has different CA, so bootstrap will fail
+# Workaround: Bootstrap manually or use extracted certs
+echo "  NOTE: Bootstrap requires manual step (cert mismatch)"
+echo "  Run: talosctl bootstrap --endpoints $MASTER_IP --nodes $MASTER_IP \\"
+echo "         --talosconfig $CONFIG_DIR/talosconfig"
+echo "  If that fails, extract certs from controlplane.yaml"
 
 # Apply to workers
 for i in $(seq 1 $WORKER_COUNT); do
@@ -228,13 +237,10 @@ done
 echo ""
 
 # =============================================================================
-# Step 5: Bootstrap Kubernetes
+# Step 5: Wait for master to reboot
 # =============================================================================
-echo "[5/7] Bootstrapping Kubernetes..."
+echo "[5/7] Waiting for master to reboot..."
 
-# Bootstrap immediately after config apply (node accepts bootstrap in maintenance mode)
-# The node will reboot after config apply, but we can bootstrap as soon as it's back
-echo "  Waiting for master to be ready for bootstrap..."
 MAX_WAIT=120
 WAITED=0
 while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --insecure &>/dev/null; do
@@ -246,19 +252,32 @@ while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --ins
     WAITED=$((WAITED + 2))
     echo "    ... waiting ($WAITED/${MAX_WAIT}s)"
 done
-echo "  ✓ Master ready (${WAITED}s)"
+echo "  ✓ Master rebooted (${WAITED}s)"
+echo ""
 
-echo "  Bootstrapping cluster..."
+# =============================================================================
+# Step 5b: Bootstrap (manual or retry)
+# =============================================================================
+echo "[5b/7] Bootstrapping Kubernetes..."
+
 # Try bootstrap with generated talosconfig
-if ! talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+echo "  Attempting bootstrap..."
+if talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
     --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null; then
-    # If that fails, try with maintenance mode (some Talos versions)
-    echo "  Retrying bootstrap..."
-    talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
-        --talosconfig "$CONFIG_DIR/talosconfig"
+    echo "  ✓ Kubernetes bootstrapped"
+else
+    echo "  Bootstrap failed (cert mismatch - known Talos 1.12+ issue)"
+    echo ""
+    echo "  MANUAL STEP REQUIRED:"
+    echo "  1. Extract admin cert from controlplane.yaml:"
+    echo "     CA_CRT=\$(yq '.machine.ca.crt' $CONFIG_DIR/controlplane.yaml)"
+    echo "     ADMIN_CRT=\$(yq '.machine.kubeadm.admin.crt' $CONFIG_DIR/controlplane.yaml)"
+    echo "     ADMIN_KEY=\$(yq '.machine.kubeadm.admin.key' $CONFIG_DIR/controlplane.yaml)"
+    echo "  2. Create talosconfig with extracted certs"
+    echo "  3. Run: talosctl bootstrap --endpoints $MASTER_IP --nodes $MASTER_IP"
+    echo ""
+    echo "  Continuing with kubectl verification..."
 fi
-
-echo "  ✓ Kubernetes bootstrapped"
 echo ""
 
 # =============================================================================
@@ -267,33 +286,34 @@ echo ""
 echo "[6/7] Configuring kubectl access..."
 
 if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then
-    if [[ "$MERGE_KUBECONFIG" == "true" ]]; then
-        echo "  Merging kubeconfig..."
-        talosctl kubeconfig --merge \
-            --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
-            --force
-        echo "  ✓ kubeconfig merged"
-    else
-        echo "  Generating local kubeconfig..."
-        talosctl kubeconfig "$CONFIG_DIR" \
-            --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
-            --force
-        echo "  ✓ kubeconfig generated: $CONFIG_DIR/kubeconfig"
-    fi
-
-    # Wait for Kubernetes API
+    # Wait for Kubernetes API server to be ready
     echo "  Waiting for Kubernetes API..."
-    MAX_WAIT=120
+    MAX_WAIT=180
     WAITED=0
-    while ! kubectl cluster-info &>/dev/null; do
+    while ! kubectl --insecure-skip-tls-verify --server="https://$MASTER_IP:6443" cluster-info &>/dev/null; do
         if (( WAITED >= MAX_WAIT )); then
             echo "WARNING: Kubernetes API not ready after ${MAX_WAIT}s"
+            echo "  (Bootstrap may not have completed)"
             break
         fi
         sleep 2
         WAITED=$((WAITED + 2))
         echo "    ... waiting ($WAITED/${MAX_WAIT}s)"
     done
+
+    # Try to get kubeconfig (requires successful bootstrap)
+    if talosctl kubeconfig "$CONFIG_DIR/kubeconfig" \
+        --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+        --force 2>/dev/null; then
+        echo "  ✓ kubeconfig fetched"
+        export KUBECONFIG="$CONFIG_DIR/kubeconfig"
+    elif [[ -f "$CONFIG_DIR/kubeconfig" ]]; then
+        echo "  Using existing kubeconfig..."
+        export KUBECONFIG="$CONFIG_DIR/kubeconfig"
+    else
+        echo "  WARNING: Could not fetch kubeconfig"
+        echo "  Use: kubectl --insecure-skip-tls-verify --server=https://$MASTER_IP:6443"
+    fi
 else
     echo "  Skipping kubectl configuration (kubectl not installed)"
 fi
@@ -304,21 +324,23 @@ echo ""
 # =============================================================================
 echo "[7/7] Verifying cluster..."
 
-# Check Talos members (use generated talosconfig after bootstrap)
-echo "  Talos members:"
-talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members \
-    --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null | head -10 || echo "    (unable to get members)"
-
 # Check Kubernetes nodes
 if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then
-    echo ""
     echo "  Kubernetes nodes:"
     kubectl get nodes 2>/dev/null || echo "    (waiting for nodes to register...)"
 
     echo ""
     echo "  System pods:"
     kubectl get pods -A 2>/dev/null | head -15 || echo "    (waiting for pods...)"
+
+    echo ""
+    echo "  Cluster info:"
+    kubectl cluster-info 2>/dev/null | head -3 || echo "    (unable to get cluster info)"
+else
+    echo "  kubectl not available, skipping Kubernetes verification"
 fi
+
+echo ""
 
 echo ""
 
