@@ -143,20 +143,22 @@ rm -f "$CONFIG_DIR"/*.yaml "$CONFIG_DIR"/talosconfig
 echo "  Generating configs for cluster: $CLUSTER_NAME"
 echo "  Endpoint: https://$MASTER_IP:6443"
 
+# Use system installer (matches running Talos version)
 talosctl gen config "$CLUSTER_NAME" "https://$MASTER_IP:6443" \
     --output-dir "$CONFIG_DIR" \
-    --install-image "factory.talos.dev/installer-ce9c9525789482bb6e077f1357da789e476925723eede6227c02e0b5d6f044b9" \
-    2>/dev/null || {
-    # Fallback without install image (uses default)
-    talosctl gen config "$CLUSTER_NAME" "https://$MASTER_IP:6443" \
-        --output-dir "$CONFIG_DIR"
-}
+    --additional-sans "$MASTER_IP"
 
 if [[ -f "$CONFIG_DIR/controlplane.yaml" ]] && [[ -f "$CONFIG_DIR/worker.yaml" ]]; then
     echo "  ✓ Configurations generated"
     echo "    - controlplane.yaml"
     echo "    - worker.yaml"
     echo "    - talosconfig"
+
+    # Fix endpoints in talosconfig (gen config leaves them empty)
+    echo "  Setting endpoints in talosconfig..."
+    talosctl config endpoint "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"
+    talosctl config node "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"
+    echo "  ✓ Endpoints configured"
 else
     echo "ERROR: Failed to generate configurations"
     exit 1
@@ -172,7 +174,7 @@ echo "[3/7] Waiting for nodes to be ready..."
 echo "  Waiting for master ($MASTER_IP)..."
 MAX_WAIT=120
 WAITED=0
-while ! talosctl --nodes "$MASTER_IP" --insecure get version &>/dev/null; do
+while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --insecure &>/dev/null; do
     if (( WAITED >= MAX_WAIT )); then
         echo "ERROR: Master not responding after ${MAX_WAIT}s"
         exit 1
@@ -188,7 +190,7 @@ for i in $(seq 1 $WORKER_COUNT); do
     WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     echo "  Waiting for worker $i ($WORKER_IP)..."
     WAITED=0
-    while ! talosctl --nodes "$WORKER_IP" --insecure get version &>/dev/null; do
+    while ! talosctl --endpoints "$WORKER_IP" --nodes "$WORKER_IP" get version --insecure &>/dev/null; do
         if (( WAITED >= MAX_WAIT )); then
             echo "ERROR: Worker $i not responding after ${MAX_WAIT}s"
             exit 1
@@ -208,9 +210,9 @@ echo "[4/7] Applying configurations..."
 
 # Apply to master (use --insecure for pre-bootstrap connection)
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
-talosctl apply-config --nodes "$MASTER_IP" \
-    --insecure \
-    --file "$CONFIG_DIR/controlplane.yaml"
+talosctl apply-config --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+    --file "$CONFIG_DIR/controlplane.yaml" \
+    --insecure
 echo "  ✓ Controlplane config applied"
 
 # Apply to workers
@@ -218,9 +220,9 @@ for i in $(seq 1 $WORKER_COUNT); do
     WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
     echo "  Applying worker config to $WORKER_NAME ($WORKER_IP)..."
-    talosctl apply-config --nodes "$WORKER_IP" \
-        --insecure \
-        --file "$CONFIG_DIR/worker.yaml"
+    talosctl apply-config --endpoints "$WORKER_IP" --nodes "$WORKER_IP" \
+        --file "$CONFIG_DIR/worker.yaml" \
+        --insecure
     echo "  ✓ Worker config applied to $WORKER_NAME"
 done
 echo ""
@@ -230,9 +232,31 @@ echo ""
 # =============================================================================
 echo "[5/7] Bootstrapping Kubernetes..."
 
+# Bootstrap immediately after config apply (node accepts bootstrap in maintenance mode)
+# The node will reboot after config apply, but we can bootstrap as soon as it's back
+echo "  Waiting for master to be ready for bootstrap..."
+MAX_WAIT=120
+WAITED=0
+while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --insecure &>/dev/null; do
+    if (( WAITED >= MAX_WAIT )); then
+        echo "ERROR: Master not ready after ${MAX_WAIT}s"
+        exit 1
+    fi
+    sleep 2
+    WAITED=$((WAITED + 2))
+    echo "    ... waiting ($WAITED/${MAX_WAIT}s)"
+done
+echo "  ✓ Master ready (${WAITED}s)"
+
 echo "  Bootstrapping cluster..."
-talosctl bootstrap --nodes "$MASTER_IP" \
-    --insecure
+# Try bootstrap with generated talosconfig
+if ! talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+    --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null; then
+    # If that fails, try with maintenance mode (some Talos versions)
+    echo "  Retrying bootstrap..."
+    talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+        --talosconfig "$CONFIG_DIR/talosconfig"
+fi
 
 echo "  ✓ Kubernetes bootstrapped"
 echo ""
@@ -246,13 +270,13 @@ if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then
     if [[ "$MERGE_KUBECONFIG" == "true" ]]; then
         echo "  Merging kubeconfig..."
         talosctl kubeconfig --merge \
-            --nodes "$MASTER_IP" \
+            --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
             --force
         echo "  ✓ kubeconfig merged"
     else
         echo "  Generating local kubeconfig..."
         talosctl kubeconfig "$CONFIG_DIR" \
-            --nodes "$MASTER_IP" \
+            --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
             --force
         echo "  ✓ kubeconfig generated: $CONFIG_DIR/kubeconfig"
     fi
@@ -282,7 +306,7 @@ echo "[7/7] Verifying cluster..."
 
 # Check Talos members (use generated talosconfig after bootstrap)
 echo "  Talos members:"
-talosctl get members --nodes "$MASTER_IP" \
+talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members \
     --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null | head -10 || echo "    (unable to get members)"
 
 # Check Kubernetes nodes
