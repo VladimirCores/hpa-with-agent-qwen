@@ -70,17 +70,54 @@ fi
 # Check VMs are running
 echo "  Checking VMs..."
 VM_COUNT=0
-for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    if virsh -c "$LIBVIRT_URI" dominfo "$vm_name" &>/dev/null; then
-        STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$vm_name" | grep "State:" | awk '{print $2}')
-        if [[ "$STATE" == "running" ]]; then
-            echo "    ✓ $vm_name: running"
-            VM_COUNT=$((VM_COUNT + 1))
-        else
-            echo "    ✗ $vm_name: $STATE (not running)"
+EXPECTED_VMS=$((1 + WORKER_COUNT))
+
+# Get actual VM names from virsh (handles Vagrant prefix)
+# Match VMs ending with the expected names
+MASTER_VM=""
+WORKER_VMS=()
+
+# Find master VM (matches talos-master or prefix_talos-master)
+while IFS= read -r line; do
+    VM_NAME=$(echo "$line" | awk '{print $2}')
+    if [[ "$VM_NAME" == *"$MASTER_NAME" ]]; then
+        MASTER_VM="$VM_NAME"
+        break
+    fi
+done < <(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -v "^ Id")
+
+# Find worker VMs
+for i in $(seq 1 $WORKER_COUNT); do
+    while IFS= read -r line; do
+        VM_NAME=$(echo "$line" | awk '{print $2}')
+        if [[ "$VM_NAME" == *"${WORKER_NAME_PREFIX}${i}" ]]; then
+            WORKER_VMS+=("$VM_NAME")
+            break
         fi
+    done < <(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -v "^ Id")
+done
+
+# Check master
+if [[ -n "$MASTER_VM" ]]; then
+    STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$MASTER_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
+    if [[ "$STATE" == "running" ]]; then
+        echo "    ✓ $MASTER_VM: running"
+        VM_COUNT=$((VM_COUNT + 1))
     else
-        echo "    ✗ $vm_name: not found"
+        echo "    ✗ $MASTER_VM: $STATE (not running)"
+    fi
+else
+    echo "    ✗ $MASTER_NAME: not found"
+fi
+
+# Check workers
+for WORKER_VM in "${WORKER_VMS[@]}"; do
+    STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$WORKER_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
+    if [[ "$STATE" == "running" ]]; then
+        echo "    ✓ $WORKER_VM: running"
+        VM_COUNT=$((VM_COUNT + 1))
+    else
+        echo "    ✗ $WORKER_VM: $STATE (not running)"
     fi
 done
 
@@ -131,11 +168,11 @@ echo ""
 # =============================================================================
 echo "[3/7] Waiting for nodes to be ready..."
 
-# Wait for master
+# Wait for master (use --insecure for pre-bootstrap connection)
 echo "  Waiting for master ($MASTER_IP)..."
 MAX_WAIT=120
 WAITED=0
-while ! talosctl --nodes "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" get version &>/dev/null; do
+while ! talosctl --nodes "$MASTER_IP" --insecure get version &>/dev/null; do
     if (( WAITED >= MAX_WAIT )); then
         echo "ERROR: Master not responding after ${MAX_WAIT}s"
         exit 1
@@ -151,7 +188,7 @@ for i in $(seq 1 $WORKER_COUNT); do
     WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     echo "  Waiting for worker $i ($WORKER_IP)..."
     WAITED=0
-    while ! talosctl --nodes "$WORKER_IP" --talosconfig "$CONFIG_DIR/talosconfig" get version &>/dev/null; do
+    while ! talosctl --nodes "$WORKER_IP" --insecure get version &>/dev/null; do
         if (( WAITED >= MAX_WAIT )); then
             echo "ERROR: Worker $i not responding after ${MAX_WAIT}s"
             exit 1
@@ -169,10 +206,10 @@ echo ""
 # =============================================================================
 echo "[4/7] Applying configurations..."
 
-# Apply to master
+# Apply to master (use --insecure for pre-bootstrap connection)
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
 talosctl apply-config --nodes "$MASTER_IP" \
-    --talosconfig "$CONFIG_DIR/talosconfig" \
+    --insecure \
     --file "$CONFIG_DIR/controlplane.yaml"
 echo "  ✓ Controlplane config applied"
 
@@ -182,7 +219,7 @@ for i in $(seq 1 $WORKER_COUNT); do
     WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
     echo "  Applying worker config to $WORKER_NAME ($WORKER_IP)..."
     talosctl apply-config --nodes "$WORKER_IP" \
-        --talosconfig "$CONFIG_DIR/talosconfig" \
+        --insecure \
         --file "$CONFIG_DIR/worker.yaml"
     echo "  ✓ Worker config applied to $WORKER_NAME"
 done
@@ -195,7 +232,7 @@ echo "[5/7] Bootstrapping Kubernetes..."
 
 echo "  Bootstrapping cluster..."
 talosctl bootstrap --nodes "$MASTER_IP" \
-    --talosconfig "$CONFIG_DIR/talosconfig"
+    --insecure
 
 echo "  ✓ Kubernetes bootstrapped"
 echo ""
@@ -210,21 +247,19 @@ if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then
         echo "  Merging kubeconfig..."
         talosctl kubeconfig --merge \
             --nodes "$MASTER_IP" \
-            --talosconfig "$CONFIG_DIR/talosconfig" \
             --force
         echo "  ✓ kubeconfig merged"
     else
         echo "  Generating local kubeconfig..."
         talosctl kubeconfig "$CONFIG_DIR" \
             --nodes "$MASTER_IP" \
-            --talosconfig "$CONFIG_DIR/talosconfig" \
             --force
         echo "  ✓ kubeconfig generated: $CONFIG_DIR/kubeconfig"
     fi
 
-    # Wait for API server
+    # Wait for Kubernetes API
     echo "  Waiting for Kubernetes API..."
-    MAX_WAIT=60
+    MAX_WAIT=120
     WAITED=0
     while ! kubectl cluster-info &>/dev/null; do
         if (( WAITED >= MAX_WAIT )); then
@@ -245,7 +280,7 @@ echo ""
 # =============================================================================
 echo "[7/7] Verifying cluster..."
 
-# Check Talos members
+# Check Talos members (use generated talosconfig after bootstrap)
 echo "  Talos members:"
 talosctl get members --nodes "$MASTER_IP" \
     --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null | head -10 || echo "    (unable to get members)"
