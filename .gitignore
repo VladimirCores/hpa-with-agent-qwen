@@ -1,0 +1,10 @@
+# Ignore ISO files
+*.iso
+*.raw*
+iso/
+
+# Ignore Vagrant files
+.vagrant/
+
+# Ignore environment file
+.env

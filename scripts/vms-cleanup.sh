@@ -1,0 +1,240 @@
+#!/bin/bash
+# =============================================================================
+# Cleanup Talos Cluster VMs
+# =============================================================================
+# This script stops and cleans up Talos cluster VMs and resources.
+# =============================================================================
+
+set -euo pipefail
+
+# Load environment variables
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Source .env file
+set -a
+source "$PROJECT_ROOT/.env"
+set +a
+
+# Parse arguments
+CLEAN_VOLUMES=false
+DESTROY_NETWORK=false
+FULL_CLEANUP=false
+CLEAR_SUDO_CACHE=false
+
+while getopts "vnfc" opt; do
+    case $opt in
+        v) CLEAN_VOLUMES=true ;;
+        n) DESTROY_NETWORK=true ;;
+        f) FULL_CLEANUP=true ;;
+        c) CLEAR_SUDO_CACHE=true ;;
+        *) echo "Usage: $0 [-v] [-n] [-f] [-c]"
+           echo "  -v  Clean volumes (stop VMs + remove disk images)"
+           echo "  -n  Destroy network (stop VMs + remove network)"
+           echo "  -f  Full cleanup (everything: VMs, volumes, network)"
+           echo "  -c  Clear sudo cache"
+           exit 1 ;;
+    esac
+done
+
+# If full cleanup is requested, enable all options
+if [[ "$FULL_CLEANUP" == "true" ]]; then
+    CLEAN_VOLUMES=true
+    DESTROY_NETWORK=true
+fi
+
+echo "=== Talos Cluster VM Cleanup ==="
+echo ""
+
+# =============================================================================
+# Step 1: Authenticate sudo if needed
+# =============================================================================
+echo "[1/7] Checking sudo authentication..."
+SUDO_CACHE_FILE="/tmp/sudo_cache_$(whoami)"
+SUDO_CACHE_DURATION=900  # 15 minutes in seconds
+
+if [[ -f "$SUDO_CACHE_FILE" ]]; then
+    CACHE_TIME=$(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0)
+    CURRENT_TIME=$(date +%s)
+    if (( CURRENT_TIME - CACHE_TIME < SUDO_CACHE_DURATION )); then
+        echo "  Sudo cache valid ($(echo $((SUDO_CACHE_DURATION - (CURRENT_TIME - CACHE_TIME))) | awk '{printf "%d:%02d", int($1/60), $1%60}'))"
+    else
+        rm -f "$SUDO_CACHE_FILE"
+        echo "  Sudo cache expired. Authenticating..."
+        sudo -v
+        touch "$SUDO_CACHE_FILE"
+    fi
+else
+    echo "  Authenticating sudo (cached for 15 minutes)..."
+    sudo -v
+    touch "$SUDO_CACHE_FILE"
+fi
+echo ""
+
+# =============================================================================
+# Step 2: Check prerequisites
+# =============================================================================
+echo "[2/7] Checking prerequisites..."
+
+# Check Vagrantfile exists
+if [[ ! -f "$PROJECT_ROOT/Vagrantfile" ]]; then
+    echo "WARNING: Vagrantfile not found in $PROJECT_ROOT"
+fi
+echo "  ✓ Vagrantfile checked"
+
+# Check vagrant-libvirt plugin
+if ! vagrant plugin list 2>/dev/null | grep -q "vagrant-libvirt"; then
+    echo "WARNING: vagrant-libvirt plugin not installed"
+else
+    echo "  ✓ vagrant-libvirt plugin installed"
+fi
+
+# Check libvirt is running
+if ! systemctl is-active --quiet libvirtd 2>/dev/null; then
+    echo "  libvirtd not active, waiting for startup..."
+    # Wait for libvirt to be ready (async startup)
+    MAX_WAIT=30
+    WAITED=0
+    while ! virsh -c "$LIBVIRT_URI" list --all &>/dev/null; do
+        if (( WAITED >= MAX_WAIT )); then
+            echo "WARNING: libvirtd not responding after ${MAX_WAIT}s"
+            break
+        fi
+        sleep 1
+        WAITED=$((WAITED + 1))
+    done
+    if (( WAITED < MAX_WAIT )); then
+        echo "  ✓ libvirtd ready (${WAITED}s)"
+    fi
+else
+    echo "  ✓ libvirtd service active"
+fi
+echo ""
+
+# =============================================================================
+# Step 3: Stop VMs with Vagrant
+# =============================================================================
+echo "[3/7] Stopping VMs with Vagrant..."
+
+cd "$PROJECT_ROOT"
+
+# Check if any VMs are managed by Vagrant
+if vagrant status 2>/dev/null | grep -q "running"; then
+    vagrant destroy -f
+    echo "  ✓ VMs stopped via Vagrant"
+else
+    echo "  No running VMs found via Vagrant"
+fi
+
+# Force cleanup of any remaining VMs via virsh
+echo "  Checking for remaining VMs..."
+for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+    if virsh -c "$LIBVIRT_URI" dominfo "$vm_name" &>/dev/null; then
+        echo "  Force stopping: $vm_name"
+        virsh -c "$LIBVIRT_URI" destroy "$vm_name" 2>/dev/null || true
+        virsh -c "$LIBVIRT_URI" undefine "$vm_name" --remove-all-storage 2>/dev/null || \
+        virsh -c "$LIBVIRT_URI" undefine "$vm_name" 2>/dev/null || true
+    fi
+done
+echo "  ✓ All VMs stopped"
+echo ""
+
+# =============================================================================
+# Step 4: Clean up volumes (if -v or -f)
+# =============================================================================
+if [[ "$CLEAN_VOLUMES" == "true" ]]; then
+    echo "[4/7] Cleaning up storage volumes..."
+
+    STORAGE_POOL="${STORAGE_POOL:-default}"
+    ISO_VOLUME_NAME="talos-metal-amd64.iso"
+
+    # Remove ISO volume from storage pool
+    if virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$ISO_VOLUME_NAME" &>/dev/null; then
+        echo "  Removing ISO volume: $ISO_VOLUME_NAME"
+        virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$ISO_VOLUME_NAME"
+        echo "  ✓ ISO volume removed"
+    else
+        echo "  ISO volume not found in storage pool"
+    fi
+
+    # Remove any VM disk volumes
+    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+        # Check for disk volumes with VM name pattern
+        for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | awk -v name="$vm_name" '$1 ~ name {print $1}'); do
+            echo "  Removing volume: $vol"
+            virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null || true
+        done
+    done
+    echo "  ✓ Volumes cleaned"
+else
+    echo "[4/7] Skipping volume cleanup (use -v for full volume cleanup)"
+fi
+echo ""
+
+# =============================================================================
+# Step 5: Destroy network (if -n or -f)
+# =============================================================================
+if [[ "$DESTROY_NETWORK" == "true" ]]; then
+    echo "[5/7] Destroying network..."
+
+    # Check if network exists
+    if virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" &>/dev/null; then
+        echo "  Stopping network: $NETWORK_NAME"
+        virsh -c "$LIBVIRT_URI" net-destroy "$NETWORK_NAME"
+
+        echo "  Undefining network: $NETWORK_NAME"
+        virsh -c "$LIBVIRT_URI" net-undefine "$NETWORK_NAME"
+
+        # Remove bridge interface if it exists
+        if ip link show "$BRIDGE_NAME" &>/dev/null; then
+            echo "  Removing bridge interface: $BRIDGE_NAME"
+            sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
+        fi
+
+        echo "  ✓ Network destroyed"
+    else
+        echo "  Network '$NETWORK_NAME' does not exist"
+    fi
+else
+    echo "[5/7] Skipping network cleanup (use -n to destroy network)"
+fi
+echo ""
+
+# =============================================================================
+# Step 6: Clear sudo cache (if -c or -f)
+# =============================================================================
+if [[ "$CLEAR_SUDO_CACHE" == "true" ]] || [[ "$FULL_CLEANUP" == "true" ]]; then
+    echo "[6/7] Clearing sudo cache..."
+    rm -f "$SUDO_CACHE_FILE"
+    echo "  ✓ Sudo cache cleared"
+else
+    echo "[6/7] Keeping sudo cache (use -c to clear)"
+fi
+echo ""
+
+# =============================================================================
+# Step 7: Summary
+# =============================================================================
+echo "[7/7] Cleanup Summary"
+echo "==================="
+echo "VMs: Stopped and undefined"
+if [[ "$CLEAN_VOLUMES" == "true" ]]; then
+    echo "Volumes: Cleaned"
+else
+    echo "Volumes: Preserved"
+fi
+if [[ "$DESTROY_NETWORK" == "true" ]]; then
+    echo "Network: Destroyed"
+else
+    echo "Network: Preserved"
+fi
+if [[ "$CLEAR_SUDO_CACHE" == "true" ]] || [[ "$FULL_CLEANUP" == "true" ]]; then
+    echo "Sudo Cache: Cleared"
+else
+    echo "Sudo Cache: Preserved"
+fi
+echo ""
+echo "To restart the cluster:"
+echo "  ./scripts/vms-startup.sh"
+echo ""
+echo "=== Cleanup Complete ==="
