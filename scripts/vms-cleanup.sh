@@ -134,7 +134,7 @@ sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
 echo "  Checking for remaining VMs..."
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
     # Find VM with matching suffix (handles Vagrant prefix)
-    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1)
+    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
     if [[ -n "$ACTUAL_VM" ]]; then
         echo "  Force stopping: $ACTUAL_VM"
         virsh -c "$LIBVIRT_URI" destroy "$ACTUAL_VM" 2>/dev/null || true
