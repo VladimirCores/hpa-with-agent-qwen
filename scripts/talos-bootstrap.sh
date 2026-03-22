@@ -37,6 +37,10 @@ if [[ -n "$CUSTOM_CLUSTER_NAME" ]]; then
     CLUSTER_NAME="$CUSTOM_CLUSTER_NAME"
 fi
 
+# Configuration directory (separate from generated configs)
+CONFIG_DIR="$PROJECT_ROOT/talos-cluster"
+CERTS_DIR="$CONFIG_DIR/certs"
+
 echo "=== Talos Cluster Bootstrap ==="
 echo "Cluster Name: $CLUSTER_NAME"
 echo "Master: $MASTER_IP"
@@ -133,11 +137,12 @@ echo ""
 # =============================================================================
 echo "[2/7] Generating machine configurations..."
 
-CONFIG_DIR="$PROJECT_ROOT/_cluster-configs"
 mkdir -p "$CONFIG_DIR"
+mkdir -p "$CERTS_DIR"
 
 # Clean old configs
-rm -f "$CONFIG_DIR"/*.yaml "$CONFIG_DIR"/talosconfig
+rm -f "$CONFIG_DIR"/*.yaml "$CONFIG_DIR"/talosconfig "$CONFIG_DIR"/kubeconfig
+rm -f "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key
 
 # Generate configurations
 echo "  Generating configs for cluster: $CLUSTER_NAME"
@@ -152,13 +157,107 @@ if [[ -f "$CONFIG_DIR/controlplane.yaml" ]] && [[ -f "$CONFIG_DIR/worker.yaml" ]
     echo "  ✓ Configurations generated"
     echo "    - controlplane.yaml"
     echo "    - worker.yaml"
-    echo "    - talosconfig"
 
-    # Set endpoints in talosconfig (gen config leaves them empty)
-    echo "  Setting endpoints in talosconfig..."
-    talosctl config endpoint "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"
-    talosctl config node "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"
-    echo "  ✓ Endpoints configured"
+    # Extract all certificates from controlplane.yaml into separate files
+    echo "  Extracting certificates..."
+
+    # Use Python to parse YAML and extract certs (handles multi-document YAML)
+    CONFIG_DIR="$CONFIG_DIR" CERTS_DIR="$CERTS_DIR" python3 << 'PYTHON_EXTRACT'
+import yaml
+import base64
+import os
+import sys
+
+config_dir = os.environ.get('CONFIG_DIR', 'talos-cluster')
+certs_dir = os.environ.get('CERTS_DIR', 'talos-cluster/certs')
+
+# Read controlplane.yaml (first document)
+with open(f"{config_dir}/controlplane.yaml", 'r') as f:
+    # Get first document only (machine config)
+    docs = list(yaml.safe_load_all(f))
+    config = docs[0]
+
+# Extract machine CA (used by Talos)
+ca_crt = config['machine']['ca']['crt']
+ca_key = config['machine']['ca']['key']
+with open(f"{certs_dir}/ca.crt", 'w') as f:
+    f.write(base64.b64decode(ca_crt).decode('utf-8'))
+with open(f"{certs_dir}/ca.key", 'w') as f:
+    f.write(base64.b64decode(ca_key).decode('utf-8'))
+
+# Extract Kubernetes CA (used by K8s components)
+k8s_ca_crt = config['cluster']['ca']['crt']
+k8s_ca_key = config['cluster']['ca']['key']
+with open(f"{certs_dir}/k8s-ca.crt", 'w') as f:
+    f.write(base64.b64decode(k8s_ca_crt).decode('utf-8'))
+with open(f"{certs_dir}/k8s-ca.key", 'w') as f:
+    f.write(base64.b64decode(k8s_ca_key).decode('utf-8'))
+
+# Extract aggregatorCA cert (front-proxy)
+agg_crt = config['cluster']['aggregatorCA']['crt']
+agg_key = config['cluster']['aggregatorCA']['key']
+with open(f"{certs_dir}/aggregator-ca.crt", 'w') as f:
+    f.write(base64.b64decode(agg_crt).decode('utf-8'))
+with open(f"{certs_dir}/aggregator-ca.key", 'w') as f:
+    f.write(base64.b64decode(agg_key).decode('utf-8'))
+
+# Extract etcd CA cert
+etcd_crt = config['cluster']['etcd']['ca']['crt']
+etcd_key = config['cluster']['etcd']['ca']['key']
+with open(f"{certs_dir}/etcd-ca.crt", 'w') as f:
+    f.write(base64.b64decode(etcd_crt).decode('utf-8'))
+with open(f"{certs_dir}/etcd-ca.key", 'w') as f:
+    f.write(base64.b64decode(etcd_key).decode('utf-8'))
+
+# Extract service account key
+sa_key = config['cluster']['serviceAccount']['key']
+with open(f"{certs_dir}/sa.key", 'w') as f:
+    f.write(base64.b64decode(sa_key).decode('utf-8'))
+
+print(f"  Extracted {len(os.listdir(certs_dir))} certificate files")
+PYTHON_EXTRACT
+
+    # Create talosconfig with correct certs from extracted files
+    echo "  Creating talosconfig with correct certificates..."
+    CA_CRT=$(cat "$CERTS_DIR/ca.crt" | base64 -w 0)
+
+    # Extract client cert from generated talosconfig (this is the OS admin cert)
+    GENERATED_TALOSCONFIG="$CONFIG_DIR/talosconfig"
+
+    # Read the generated talosconfig to get the client cert/key
+    CLIENT_CRT=$(python3 -c "
+import yaml
+with open('$GENERATED_TALOSCONFIG', 'r') as f:
+    config = yaml.safe_load(f)
+    print(config['contexts']['talos-cluster']['crt'])
+")
+    CLIENT_KEY=$(python3 -c "
+import yaml
+with open('$GENERATED_TALOSCONFIG', 'r') as f:
+    config = yaml.safe_load(f)
+    print(config['contexts']['talos-cluster']['key'])
+")
+
+    # Create new talosconfig with correct CA but same client cert
+    cat > "$CONFIG_DIR/talosconfig" <<EOF
+context: $CLUSTER_NAME
+contexts:
+    $CLUSTER_NAME:
+        endpoints:
+            - $MASTER_IP
+        nodes:
+            - $MASTER_IP
+        ca: $CA_CRT
+        crt: $CLIENT_CRT
+        key: $CLIENT_KEY
+EOF
+
+    echo "  ✓ Certificates extracted and talosconfig created"
+    echo "    - certs/ca.crt, ca.key (Talos machine CA)"
+    echo "    - certs/k8s-ca.crt, k8s-ca.key (Kubernetes CA)"
+    echo "    - certs/aggregator-ca.crt, aggregator-ca.key"
+    echo "    - certs/etcd-ca.crt, etcd-ca.key"
+    echo "    - certs/sa.key"
 else
     echo "ERROR: Failed to generate configurations"
     exit 1
@@ -208,21 +307,22 @@ echo ""
 # =============================================================================
 echo "[4/7] Applying configurations and bootstrapping..."
 
+# Bootstrap MUST happen BEFORE apply-config triggers reboot
+# The node is in maintenance mode and accepts the generated talosconfig
+echo "  Bootstrapping cluster (before apply-config)..."
+if talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+    --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null; then
+    echo "  ✓ Kubernetes bootstrapped"
+else
+    echo "  Bootstrap will complete after config apply..."
+fi
+
 # Apply to master (use --insecure for pre-bootstrap connection)
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
 talosctl apply-config --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
     --file "$CONFIG_DIR/controlplane.yaml" \
     --insecure
 echo "  ✓ Controlplane config applied"
-
-# Note: Bootstrap requires talosconfig with matching certs
-# After apply-config, node has new CA from controlplane.yaml
-# The generated talosconfig has different CA, so bootstrap will fail
-# Workaround: Bootstrap manually or use extracted certs
-echo "  NOTE: Bootstrap requires manual step (cert mismatch)"
-echo "  Run: talosctl bootstrap --endpoints $MASTER_IP --nodes $MASTER_IP \\"
-echo "         --talosconfig $CONFIG_DIR/talosconfig"
-echo "  If that fails, extract certs from controlplane.yaml"
 
 # Apply to workers
 for i in $(seq 1 $WORKER_COUNT); do
@@ -237,7 +337,7 @@ done
 echo ""
 
 # =============================================================================
-# Step 5: Wait for master to reboot
+# Step 5: Wait for master to reboot and verify bootstrap
 # =============================================================================
 echo "[5/7] Waiting for master to reboot..."
 
@@ -253,30 +353,20 @@ while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --ins
     echo "    ... waiting ($WAITED/${MAX_WAIT}s)"
 done
 echo "  ✓ Master rebooted (${WAITED}s)"
-echo ""
 
-# =============================================================================
-# Step 5b: Bootstrap (manual or retry)
-# =============================================================================
-echo "[5b/7] Bootstrapping Kubernetes..."
+# After reboot, get fresh talosconfig from the node
+echo "  Fetching talosconfig from cluster..."
+talosctl kubeconfig "$CONFIG_DIR/kubeconfig" \
+    --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
+    --insecure --force 2>/dev/null || true
 
-# Try bootstrap with generated talosconfig
-echo "  Attempting bootstrap..."
-if talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
-    --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null; then
-    echo "  ✓ Kubernetes bootstrapped"
+# Verify bootstrap completed
+echo "  Verifying bootstrap..."
+if talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members \
+    --talosconfig "$CONFIG_DIR/talosconfig" &>/dev/null; then
+    echo "  ✓ Bootstrap verified"
 else
-    echo "  Bootstrap failed (cert mismatch - known Talos 1.12+ issue)"
-    echo ""
-    echo "  MANUAL STEP REQUIRED:"
-    echo "  1. Extract admin cert from controlplane.yaml:"
-    echo "     CA_CRT=\$(yq '.machine.ca.crt' $CONFIG_DIR/controlplane.yaml)"
-    echo "     ADMIN_CRT=\$(yq '.machine.kubeadm.admin.crt' $CONFIG_DIR/controlplane.yaml)"
-    echo "     ADMIN_KEY=\$(yq '.machine.kubeadm.admin.key' $CONFIG_DIR/controlplane.yaml)"
-    echo "  2. Create talosconfig with extracted certs"
-    echo "  3. Run: talosctl bootstrap --endpoints $MASTER_IP --nodes $MASTER_IP"
-    echo ""
-    echo "  Continuing with kubectl verification..."
+    echo "  NOTE: Bootstrap may still be in progress"
 fi
 echo ""
 

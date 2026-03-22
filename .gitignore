@@ -8,3 +8,4 @@ iso/
 
 # Ignore environment file
 .env
+talos-cluster/

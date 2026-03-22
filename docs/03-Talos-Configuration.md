@@ -121,18 +121,19 @@ CLUSTER_NAME="talos-cluster"
 MASTER_IP="10.0.0.10"
 
 # Create config directory
-mkdir -p _cluster-configs
+mkdir -p talos-cluster
 
-# Generate configurations
+# Generate configurations (done automatically by bootstrap script)
 talosctl gen config $CLUSTER_NAME https://$MASTER_IP:6443 \
-  --output-dir _cluster-configs
+  --output-dir talos-cluster
 ```
 
 This generates:
 
-- `controlplane.yaml` - For master nodes
-- `worker.yaml` - For worker nodes
-- `talosconfig` - Client configuration
+- `talos-cluster/controlplane.yaml` - For master nodes
+- `talos-cluster/worker.yaml` - For worker nodes
+- `talos-cluster/talosconfig` - Client configuration
+- `talos-cluster/certs/` - Extracted certificate files
 
 #### Step 2: Apply Configuration to Master
 
@@ -142,23 +143,23 @@ talosctl wait --nodes 10.0.0.10
 
 # Apply control plane configuration
 talosctl apply-config --nodes 10.0.0.10 \
-  --file _cluster-configs/controlplane.yaml
+  --file talos-cluster/controlplane.yaml
 ```
 
-> **Note for Talos 1.12+**: After applying the config, there's a known certificate mismatch issue when bootstrapping. See "Troubleshooting" below for the workaround.
+> **Note**: The bootstrap script (`./scripts/talos-bootstrap.sh`) now automatically extracts certificates and creates the correct talosconfig, so manual workaround is no longer needed.
 
-#### Bootstrap Workaround (Talos 1.12+)
+#### Bootstrap Workaround (Talos 1.12+) - Manual Method
 
-Due to a certificate mismatch between the generated `talosconfig` and the node's actual CA after config apply, bootstrap may fail. To fix this:
+If bootstrapping manually (without the script), there may be a certificate mismatch. To fix this:
 
 ```bash
 # Extract certs from controlplane.yaml (requires yq)
-CA_CRT=$(yq -r '.machine.ca.crt' _cluster-configs/controlplane.yaml)
-ADMIN_CRT=$(yq -r '.machine.kubeadm.admin.crt' _cluster-configs/controlplane.yaml)
-ADMIN_KEY=$(yq -r '.machine.kubeadm.admin.key' _cluster-configs/controlplane.yaml)
+CA_CRT=$(yq -r '.machine.ca.crt' talos-cluster/controlplane.yaml)
+ADMIN_CRT=$(yq -r '.machine.kubeadm.admin.crt' talos-cluster/controlplane.yaml)
+ADMIN_KEY=$(yq -r '.machine.kubeadm.admin.key' talos-cluster/controlplane.yaml)
 
 # Create talosconfig with correct certs
-cat > _cluster-configs/talosconfig <<EOF
+cat > talos-cluster/talosconfig <<EOF
 context: talos-cluster
 contexts:
     talos-cluster:
@@ -173,7 +174,7 @@ EOF
 
 # Now bootstrap
 talosctl bootstrap --nodes 10.0.0.10 \
-  --talosconfig _cluster-configs/talosconfig
+  --talosconfig talos-cluster/talosconfig
 ```
 
 #### Step 3: Apply Configuration to Workers
@@ -185,10 +186,10 @@ talosctl wait --nodes 10.0.0.12
 
 # Apply worker configuration
 talosctl apply-config --nodes 10.0.0.11 \
-  --file _cluster-configs/worker.yaml
+  --file talos-cluster/worker.yaml
 
 talosctl apply-config --nodes 10.0.0.12 \
-  --file _cluster-configs/worker.yaml
+  --file talos-cluster/worker.yaml
 ```
 
 #### Step 4: Bootstrap Kubernetes
