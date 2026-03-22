@@ -278,7 +278,9 @@ echo "[4/7] Bootstrapping cluster (before apply-config)..."
 # Bootstrap while node is still in maintenance mode
 
 echo "  Bootstrapping cluster..."
-if talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" --insecure; then
+# Bootstrap in maintenance mode - no talosconfig needed
+# Note: --insecure must come AFTER the command in Talos v1.11.x
+if talosctl bootstrap --nodes "$MASTER_IP" --insecure; then
     echo "  ✓ Kubernetes bootstrapped"
 else
     echo "  ERROR: Bootstrap failed"
