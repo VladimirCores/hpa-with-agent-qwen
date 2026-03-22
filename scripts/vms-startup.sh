@@ -159,8 +159,15 @@ else
     # Get pool path from pool-dumpxml
     POOL_PATH=$(virsh -c "$LIBVIRT_URI" pool-dumpxml "$STORAGE_POOL" | grep "<path>" | sed 's/.*<path>\(.*\)<\/path>.*/\1/')
     if [[ -n "$POOL_PATH" ]]; then
-        cp "$TALOS_IMAGE_PATH" "$POOL_PATH/$ISO_VOLUME_NAME"
-        chmod 644 "$POOL_PATH/$ISO_VOLUME_NAME"
+        if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
+            sudo cp "$TALOS_IMAGE_PATH" "$POOL_PATH/$ISO_VOLUME_NAME"
+            sudo chmod 644 "$POOL_PATH/$ISO_VOLUME_NAME"
+        else
+            echo "  Sudo authentication required..."
+            sudo cp "$TALOS_IMAGE_PATH" "$POOL_PATH/$ISO_VOLUME_NAME"
+            sudo chmod 644 "$POOL_PATH/$ISO_VOLUME_NAME"
+            touch "$SUDO_CACHE_FILE"
+        fi
         virsh -c "$LIBVIRT_URI" pool-refresh "$STORAGE_POOL"
         echo "  ✓ ISO copied to storage pool"
     else
@@ -233,7 +240,13 @@ fi
 
 # Fix .vagrant directory permissions (Vagrant may create root-owned files)
 echo "  Fixing .vagrant permissions..."
-sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
+    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+else
+    echo "  Sudo authentication required for permission fix..."
+    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+    touch "$SUDO_CACHE_FILE"
+fi
 
 echo "  ✓ VMs started"
 echo ""

@@ -128,7 +128,13 @@ fi
 
 # Fix .vagrant directory permissions (Vagrant may create root-owned files)
 echo "  Fixing .vagrant permissions..."
-sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
+    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+else
+    echo "  Sudo authentication required for permission fix..."
+    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+    touch "$SUDO_CACHE_FILE"
+fi
 
 # Force cleanup of any remaining VMs via virsh
 echo "  Checking for remaining VMs..."
@@ -194,7 +200,13 @@ if [[ "$DESTROY_NETWORK" == "true" ]]; then
         # Remove bridge interface if it exists
         if ip link show "$BRIDGE_NAME" &>/dev/null; then
             echo "  Removing bridge interface: $BRIDGE_NAME"
-            sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
+            if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
+                sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
+            else
+                echo "  Sudo authentication required..."
+                sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
+                touch "$SUDO_CACHE_FILE"
+            fi
         fi
 
         echo "  ✓ Network destroyed"
