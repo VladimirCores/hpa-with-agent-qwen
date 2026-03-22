@@ -102,14 +102,18 @@ Talos uses three configuration types:
 
 ### Quick Start (Automated)
 
-Bootstrap the entire cluster automatically:
+Bootstrap the entire cluster and install Kubernetes components:
 
 ```bash
-# Bootstrap Talos and install K8s components
+# Bootstrap Talos
 ./scripts/talos-bootstrap.sh
 
-# Install additional Kubernetes components
+# Install Kubernetes components (Cilium CNI + metrics-server)
 ./scripts/k8s-components.sh
+
+# Or choose a different CNI:
+./scripts/k8s-components.sh --cni-calico    # Use Calico instead
+./scripts/k8s-components.sh --cni-flannel   # Use Flannel instead
 ```
 
 ### Manual Steps
