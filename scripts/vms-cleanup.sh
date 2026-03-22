@@ -128,7 +128,7 @@ fi
 
 # Fix .vagrant directory permissions (Vagrant may create root-owned files)
 echo "  Fixing .vagrant permissions..."
-sudo chown -R "$(whoami)": "$(pwd)/.vagrant" 2>/dev/null || true
+sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
 
 # Force cleanup of any remaining VMs via virsh
 echo "  Checking for remaining VMs..."
