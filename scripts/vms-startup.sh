@@ -240,12 +240,14 @@ echo "[8/9] Verifying deployment..."
 
 sleep 5  # Give VMs time to boot
 
-# Check VM status
+# Check VM status (handle Vagrant prefix)
 echo "  VM Status:"
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    if virsh -c "$LIBVIRT_URI" dominfo "$vm_name" &>/dev/null; then
-        STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$vm_name" | grep "State:" | awk '{print $2}')
-        echo "    - $vm_name: $STATE"
+    # Find VM with matching suffix (handles Vagrant prefix)
+    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1)
+    if [[ -n "$ACTUAL_VM" ]]; then
+        STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
+        echo "    - $ACTUAL_VM: $STATE"
     else
         echo "    - $vm_name: NOT FOUND"
     fi
