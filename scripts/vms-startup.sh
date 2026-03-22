@@ -29,28 +29,26 @@ echo "=== Talos Cluster VM Startup ==="
 echo ""
 
 # =============================================================================
-# Step 1: Authenticate sudo if needed (cache for 15 minutes)
+# Step 1: Authenticate sudo (local cache, cleaned up on exit)
 # =============================================================================
-echo "[1/9] Checking sudo authentication..."
-SUDO_CACHE_FILE="/tmp/sudo_cache_$(whoami)"
+SUDO_CACHE_FILE="$PROJECT_ROOT/.sudo_cache_$(whoami)"
 SUDO_CACHE_DURATION=900  # 15 minutes in seconds
 
-if [[ -f "$SUDO_CACHE_FILE" ]]; then
-    CACHE_TIME=$(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0)
-    CURRENT_TIME=$(date +%s)
-    if (( CURRENT_TIME - CACHE_TIME < SUDO_CACHE_DURATION )); then
-        echo "  Sudo cache valid ($(echo $((SUDO_CACHE_DURATION - (CURRENT_TIME - CACHE_TIME))) | awk '{printf "%d:%02d", int($1/60), $1%60}'))"
-    else
-        rm -f "$SUDO_CACHE_FILE"
-        echo "  Sudo cache expired. Authenticating..."
-        sudo -v
-        touch "$SUDO_CACHE_FILE"
-    fi
-else
-    echo "  Authenticating sudo (cached for 15 minutes)..."
-    sudo -v
-    touch "$SUDO_CACHE_FILE"
-fi
+# Cleanup function
+cleanup() {
+    rm -f "$SUDO_CACHE_FILE" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "[1/9] Authenticating sudo..."
+echo "  Sudo authentication required (cached during script run)..."
+sudo -v
+touch "$SUDO_CACHE_FILE"
+echo "  ✓ Sudo authenticated"
+
+# Fix .vagrant directory permissions BEFORE vagrant commands
+echo "  Fixing .vagrant permissions..."
+sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
 echo ""
 
 # =============================================================================
@@ -159,15 +157,8 @@ else
     # Get pool path from pool-dumpxml
     POOL_PATH=$(virsh -c "$LIBVIRT_URI" pool-dumpxml "$STORAGE_POOL" | grep "<path>" | sed 's/.*<path>\(.*\)<\/path>.*/\1/')
     if [[ -n "$POOL_PATH" ]]; then
-        if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
-            sudo cp "$TALOS_IMAGE_PATH" "$POOL_PATH/$ISO_VOLUME_NAME"
-            sudo chmod 644 "$POOL_PATH/$ISO_VOLUME_NAME"
-        else
-            echo "  Sudo authentication required..."
-            sudo cp "$TALOS_IMAGE_PATH" "$POOL_PATH/$ISO_VOLUME_NAME"
-            sudo chmod 644 "$POOL_PATH/$ISO_VOLUME_NAME"
-            touch "$SUDO_CACHE_FILE"
-        fi
+        sudo cp "$TALOS_IMAGE_PATH" "$POOL_PATH/$ISO_VOLUME_NAME"
+        sudo chmod 644 "$POOL_PATH/$ISO_VOLUME_NAME"
         virsh -c "$LIBVIRT_URI" pool-refresh "$STORAGE_POOL"
         echo "  ✓ ISO copied to storage pool"
     else
@@ -237,17 +228,6 @@ if [[ $? -ne 0 ]]; then
     echo "ERROR: Vagrant failed to start VMs"
     exit 1
 fi
-
-# Fix .vagrant directory permissions (Vagrant may create root-owned files)
-echo "  Fixing .vagrant permissions..."
-if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
-    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
-else
-    echo "  Sudo authentication required for permission fix..."
-    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
-    touch "$SUDO_CACHE_FILE"
-fi
-
 echo "  ✓ VMs started"
 echo ""
 

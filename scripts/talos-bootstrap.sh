@@ -159,6 +159,34 @@ if [[ -f "$CONFIG_DIR/controlplane.yaml" ]] && [[ -f "$CONFIG_DIR/worker.yaml" ]
     echo "    - worker.yaml"
     echo "    - talosconfig"
 
+    # Add install disk configuration to controlplane.yaml
+    # This ensures Talos installs to disk instead of running in live mode
+    echo "  Adding install disk configuration..."
+    CONFIG_DIR="$CONFIG_DIR" python3 << 'PYTHON_INSTALL'
+import yaml
+import os
+
+config_dir = os.environ.get('CONFIG_DIR', 'talos-cluster')
+
+# Read controlplane.yaml
+with open(f"{config_dir}/controlplane.yaml", 'r') as f:
+    docs = list(yaml.safe_load_all(f))
+    config = docs[0]
+
+# Add install disk if not present
+if 'install' not in config.get('machine', {}):
+    if 'machine' not in config:
+        config['machine'] = {}
+    config['machine']['install'] = {'disk': '/dev/vda'}
+
+    # Write back
+    with open(f"{config_dir}/controlplane.yaml", 'w') as f:
+        yaml.dump_all([config] + docs[1:], f, default_flow_style=False, sort_keys=False)
+    print("    ✓ Install disk configured: /dev/vda")
+else:
+    print("    ✓ Install disk already configured")
+PYTHON_INSTALL
+
     # Extract certificates for reference (don't modify talosconfig)
     echo "  Extracting certificates..."
 
@@ -348,7 +376,7 @@ done
 echo ""
 
 # =============================================================================
-# Step 5: Verify bootstrap
+# Step 5: Verify bootstrap and set boot order
 # =============================================================================
 echo "[5/7] Verifying bootstrap..."
 
@@ -360,6 +388,12 @@ echo "  Talos cluster members:"
 if talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members --insecure &>/dev/null; then
     talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members --insecure 2>/dev/null | head -10
     echo "  ✓ Bootstrap verified"
+
+    # Change boot order to disk (so VMs boot from disk instead of ISO on next reboot)
+    echo "  Setting VM boot order to disk..."
+    if [[ -x "$SCRIPT_DIR/set-boot-order.sh" ]]; then
+        "$SCRIPT_DIR/set-boot-order.sh" 2>/dev/null || echo "    WARNING: Could not change boot order"
+    fi
 else
     echo "  WARNING: Unable to verify bootstrap"
 fi

@@ -60,6 +60,8 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
                      path: File.expand_path(TALOS_IMAGE_PATH)
       domain.boot 'cdrom'
       domain.boot 'hd'  # Fallback to hard disk
+      # Add disk for Talos installation
+      domain.storage :file, size: '5G'
     end
   end
 end

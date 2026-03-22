@@ -20,19 +20,16 @@ set +a
 CLEAN_VOLUMES=false
 DESTROY_NETWORK=false
 FULL_CLEANUP=false
-CLEAR_SUDO_CACHE=false
 
-while getopts "vnfc" opt; do
+while getopts "vnf" opt; do
     case $opt in
         v) CLEAN_VOLUMES=true ;;
         n) DESTROY_NETWORK=true ;;
         f) FULL_CLEANUP=true ;;
-        c) CLEAR_SUDO_CACHE=true ;;
-        *) echo "Usage: $0 [-v] [-n] [-f] [-c]"
+        *) echo "Usage: $0 [-v] [-n] [-f]"
            echo "  -v  Clean volumes (stop VMs + remove disk images)"
            echo "  -n  Destroy network (stop VMs + remove network)"
            echo "  -f  Full cleanup (everything: VMs, volumes, network)"
-           echo "  -c  Clear sudo cache"
            exit 1 ;;
     esac
 done
@@ -47,28 +44,26 @@ echo "=== Talos Cluster VM Cleanup ==="
 echo ""
 
 # =============================================================================
-# Step 1: Authenticate sudo if needed
+# Step 1: Authenticate sudo (local cache, cleaned up on exit)
 # =============================================================================
-echo "[1/7] Checking sudo authentication..."
-SUDO_CACHE_FILE="/tmp/sudo_cache_$(whoami)"
+SUDO_CACHE_FILE="$PROJECT_ROOT/.sudo_cache_$(whoami)"
 SUDO_CACHE_DURATION=900  # 15 minutes in seconds
 
-if [[ -f "$SUDO_CACHE_FILE" ]]; then
-    CACHE_TIME=$(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0)
-    CURRENT_TIME=$(date +%s)
-    if (( CURRENT_TIME - CACHE_TIME < SUDO_CACHE_DURATION )); then
-        echo "  Sudo cache valid ($(echo $((SUDO_CACHE_DURATION - (CURRENT_TIME - CACHE_TIME))) | awk '{printf "%d:%02d", int($1/60), $1%60}'))"
-    else
-        rm -f "$SUDO_CACHE_FILE"
-        echo "  Sudo cache expired. Authenticating..."
-        sudo -v
-        touch "$SUDO_CACHE_FILE"
-    fi
-else
-    echo "  Authenticating sudo (cached for 15 minutes)..."
-    sudo -v
-    touch "$SUDO_CACHE_FILE"
-fi
+# Cleanup function
+cleanup() {
+    rm -f "$SUDO_CACHE_FILE" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "[1/7] Authenticating sudo..."
+echo "  Sudo authentication required (cached during script run)..."
+sudo -v
+touch "$SUDO_CACHE_FILE"
+echo "  ✓ Sudo authenticated"
+
+# Fix .vagrant directory permissions BEFORE vagrant commands
+echo "  Fixing .vagrant permissions..."
+sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
 echo ""
 
 # =============================================================================
@@ -124,16 +119,6 @@ if vagrant status 2>/dev/null | grep -q "running"; then
     echo "  ✓ VMs stopped via Vagrant"
 else
     echo "  No running VMs found via Vagrant"
-fi
-
-# Fix .vagrant directory permissions (Vagrant may create root-owned files)
-echo "  Fixing .vagrant permissions..."
-if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
-    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
-else
-    echo "  Sudo authentication required for permission fix..."
-    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
-    touch "$SUDO_CACHE_FILE"
 fi
 
 # Force cleanup of any remaining VMs via virsh
@@ -200,13 +185,7 @@ if [[ "$DESTROY_NETWORK" == "true" ]]; then
         # Remove bridge interface if it exists
         if ip link show "$BRIDGE_NAME" &>/dev/null; then
             echo "  Removing bridge interface: $BRIDGE_NAME"
-            if [[ -f "$SUDO_CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$SUDO_CACHE_FILE" 2>/dev/null || echo 0) < SUDO_CACHE_DURATION )); then
-                sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
-            else
-                echo "  Sudo authentication required..."
-                sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
-                touch "$SUDO_CACHE_FILE"
-            fi
+            sudo ip link delete "$BRIDGE_NAME" 2>/dev/null || true
         fi
 
         echo "  ✓ Network destroyed"
@@ -219,15 +198,10 @@ fi
 echo ""
 
 # =============================================================================
-# Step 6: Clear sudo cache (if -c or -f)
+# Step 6: Sudo cache (auto-cleaned on exit)
 # =============================================================================
-if [[ "$CLEAR_SUDO_CACHE" == "true" ]] || [[ "$FULL_CLEANUP" == "true" ]]; then
-    echo "[6/7] Clearing sudo cache..."
-    rm -f "$SUDO_CACHE_FILE"
-    echo "  ✓ Sudo cache cleared"
-else
-    echo "[6/7] Keeping sudo cache (use -c to clear)"
-fi
+echo "[6/7] Sudo cache..."
+echo "  ✓ Sudo cache will be cleaned up automatically"
 echo ""
 
 # =============================================================================
@@ -246,13 +220,11 @@ if [[ "$DESTROY_NETWORK" == "true" ]]; then
 else
     echo "Network: Preserved"
 fi
-if [[ "$CLEAR_SUDO_CACHE" == "true" ]] || [[ "$FULL_CLEANUP" == "true" ]]; then
-    echo "Sudo Cache: Cleared"
-else
-    echo "Sudo Cache: Preserved"
-fi
 echo ""
 echo "To restart the cluster:"
 echo "  ./scripts/vms-startup.sh"
+echo ""
+echo "Note: After cleanup, VMs will boot from ISO (CDROM) on next start."
+echo "      Run ./scripts/talos-bootstrap.sh to change boot order to disk."
 echo ""
 echo "=== Cleanup Complete ==="

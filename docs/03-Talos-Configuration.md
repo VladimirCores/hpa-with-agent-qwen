@@ -11,6 +11,30 @@ After VMs are running, this step covers:
 3. **Install Kubernetes Components** - CNI, metrics-server, and essential addons
 4. **Verify Cluster** - Ensure everything is working correctly
 
+> **⚠️ Talos v1.12.x Bootstrap Bug**
+>
+> Talos v1.12.0-v1.12.5 have a known bootstrap bug where the CA certificate in the generated `talosconfig` doesn't match the node's CA after `apply-config`, causing bootstrap to fail with:
+>
+> ```
+> tls: failed to verify certificate: x509: certificate signed by unknown authority
+> ```
+>
+> **Workaround**: Use Talos v1.11.5 until the bug is fixed. The default `.env` file is configured to use v1.11.5.
+>
+> To use v1.11.5:
+>
+> ```bash
+> # Update .env (already set by default)
+> TALOS_IMAGE_URL=https://github.com/siderolabs/talos/releases/download/v1.11.5/metal-amd64.iso
+>
+> # Then clean and restart
+> ./scripts/vms-cleanup.sh -f
+> ./scripts/vms-startup.sh
+> ./scripts/talos-bootstrap.sh
+> ```
+>
+> **Track the bug**: https://github.com/siderolabs/talos/issues
+
 ### Architecture
 
 ```
@@ -115,6 +139,8 @@ Bootstrap the entire cluster and install Kubernetes components:
 ./scripts/k8s-components.sh --cni-calico    # Use Calico instead
 ./scripts/k8s-components.sh --cni-flannel   # Use Flannel instead
 ```
+
+> **Note**: After successful bootstrap, the script automatically changes VM boot order from CDROM (ISO) to disk. This ensures VMs boot from the installed Talos on disk instead of the ISO on subsequent reboots.
 
 ### Manual Steps
 
@@ -320,6 +346,26 @@ kubectl top pods -A
 ```
 
 ## Troubleshooting
+
+### Bootstrap fails with "certificate signed by unknown authority"
+
+This is a **known bug in Talos v1.12.0-v1.12.5**. The CA certificate in the generated `talosconfig` doesn't match the node's CA after `apply-config`.
+
+**Solution**: Use Talos v1.11.5:
+
+```bash
+# 1. Update .env to use v1.11.5 ISO
+echo 'TALOS_IMAGE_URL=https://github.com/siderolabs/talos/releases/download/v1.11.5/metal-amd64.iso' >> .env
+
+# 2. Clean up existing VMs
+./scripts/vms-cleanup.sh -f
+
+# 3. Start fresh
+./scripts/vms-startup.sh
+./scripts/talos-bootstrap.sh
+```
+
+**Track the bug**: https://github.com/siderolabs/talos/issues
 
 ### Nodes not ready
 
