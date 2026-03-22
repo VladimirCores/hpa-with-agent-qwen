@@ -126,14 +126,20 @@ else
     echo "  No running VMs found via Vagrant"
 fi
 
+# Fix .vagrant directory permissions (Vagrant may create root-owned files)
+echo "  Fixing .vagrant permissions..."
+sudo chown -R "$(whoami)": "$(pwd)/.vagrant" 2>/dev/null || true
+
 # Force cleanup of any remaining VMs via virsh
 echo "  Checking for remaining VMs..."
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    if virsh -c "$LIBVIRT_URI" dominfo "$vm_name" &>/dev/null; then
-        echo "  Force stopping: $vm_name"
-        virsh -c "$LIBVIRT_URI" destroy "$vm_name" 2>/dev/null || true
-        virsh -c "$LIBVIRT_URI" undefine "$vm_name" --remove-all-storage 2>/dev/null || \
-        virsh -c "$LIBVIRT_URI" undefine "$vm_name" 2>/dev/null || true
+    # Find VM with matching suffix (handles Vagrant prefix)
+    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1)
+    if [[ -n "$ACTUAL_VM" ]]; then
+        echo "  Force stopping: $ACTUAL_VM"
+        virsh -c "$LIBVIRT_URI" destroy "$ACTUAL_VM" 2>/dev/null || true
+        virsh -c "$LIBVIRT_URI" undefine "$ACTUAL_VM" --remove-all-storage 2>/dev/null || \
+        virsh -c "$LIBVIRT_URI" undefine "$ACTUAL_VM" 2>/dev/null || true
     fi
 done
 echo "  ✓ All VMs stopped"
