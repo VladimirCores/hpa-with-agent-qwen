@@ -57,11 +57,20 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
       # Boot from Talos image (critical for Talos live environment)
       domain.storage :file,
                      device: :cdrom,
-                     path: File.expand_path(TALOS_IMAGE_PATH)
+                     path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
       domain.boot 'cdrom'
       domain.boot 'hd'  # Fallback to hard disk
-      # Add disk for Talos installation
-      domain.storage :file, size: '5G'
+      # Persistent disk for Talos installation
+      # Stored in user's home directory to survive vagrant destroy
+      disk_dir = File.join(ENV['HOME'], '.vagrant-persistent-disks')
+      FileUtils.mkdir_p(disk_dir) unless File.directory?(disk_dir)
+      disk_path = File.join(disk_dir, "#{name}.qcow2")
+      domain.storage :file,
+                     size: '5G',
+                     path: disk_path,
+                     bus: 'virtio',
+                     cache: 'none',
+                     discard: true
     end
   end
 end

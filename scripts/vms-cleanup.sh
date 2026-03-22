@@ -115,8 +115,10 @@ cd "$PROJECT_ROOT"
 
 # Check if any VMs are managed by Vagrant
 if vagrant status 2>/dev/null | grep -q "running"; then
-    vagrant destroy -f
-    echo "  ✓ VMs stopped via Vagrant"
+    # Use halt instead of destroy to preserve disks
+    echo "  Stopping VMs (preserving disks)..."
+    vagrant halt
+    echo "  ✓ VMs stopped"
 else
     echo "  No running VMs found via Vagrant"
 fi

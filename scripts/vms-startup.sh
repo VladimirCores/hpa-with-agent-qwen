@@ -18,10 +18,15 @@ set +a
 
 # Parse arguments
 SKIP_CLEANUP=false
-while getopts "s" opt; do
+FORCE_RESET=false
+while getopts "sf" opt; do
     case $opt in
         s) SKIP_CLEANUP=true ;;
-        *) echo "Usage: $0 [-s]"; echo "  -s  Skip cleanup (start without destroying existing VMs)"; exit 1 ;;
+        f) FORCE_RESET=true ;;
+        *) echo "Usage: $0 [-s] [-f]"
+           echo "  -s  Skip cleanup (start without stopping existing VMs)"
+           echo "  -f  Force reset (destroy VMs and disks, fresh start)"
+           exit 1 ;;
     esac
 done
 
@@ -215,12 +220,19 @@ echo "[7/9] Starting VMs with Vagrant..."
 
 cd "$PROJECT_ROOT"
 
-if [[ "$SKIP_CLEANUP" == "false" ]]; then
-    # Clean start - destroy and reload
+if [[ "$FORCE_RESET" == "true" ]]; then
+    # Full reset - destroy VMs and disks
+    echo "  Force reset requested - destroying VMs and disks..."
     vagrant destroy -f 2>/dev/null || true
     vagrant up --provider=libvirt
+elif [[ "$SKIP_CLEANUP" == "false" ]]; then
+    # Normal start - halt VMs first (preserves disks), then start
+    echo "  Stopping existing VMs (preserving disks)..."
+    vagrant halt 2>/dev/null || true
+    echo "  Starting VMs..."
+    vagrant up --provider=libvirt
 else
-    # Start existing VMs
+    # Start existing VMs without stopping
     vagrant up --provider=libvirt
 fi
 
