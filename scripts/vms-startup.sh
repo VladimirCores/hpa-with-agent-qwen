@@ -230,6 +230,11 @@ if [[ $? -ne 0 ]]; then
     echo "ERROR: Vagrant failed to start VMs"
     exit 1
 fi
+
+# Fix .vagrant directory permissions (Vagrant may create root-owned files)
+echo "  Fixing .vagrant permissions..."
+sudo chown -R "$(whoami)": "$(pwd)/.vagrant" 2>/dev/null || true
+
 echo "  ✓ VMs started"
 echo ""
 
