@@ -23,6 +23,12 @@ else
     exit 1
 fi
 
+# Export all variables for subprocesses
+export NETWORK_NAME MASTER_NAME MASTER_IP WORKER_COUNT
+export WORKER_NAME_PREFIX WORKER_IP_BASE STORAGE_POOL LIBVIRT_URI
+export SKIP_CLEANUP FORCE_RESET VERBOSE CLUSTER_NAME TALOS_IMAGE_URL TALOS_IMAGE_PATH
+export SUDO_USER
+
 # Parse arguments
 SKIP_CLEANUP=false
 FORCE_RESET=false
@@ -110,14 +116,8 @@ step_07_start_vms() {
 }
 
 step_08_wait_for_talos() {
-    export NETWORK_NAME="$NETWORK_NAME"
-    export MASTER_NAME="$MASTER_NAME"
-    export MASTER_IP="$MASTER_IP"
-    export WORKER_COUNT="$WORKER_COUNT"
-    export WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX"
-    export LIBVIRT_URI="$LIBVIRT_URI"
-    export VERBOSE="$VERBOSE"
-    bash "$STEPS_DIR/08-wait-for-talos.sh"
+    # Source the step script directly to preserve environment
+    source "$STEPS_DIR/08-wait-for-talos.sh"
 }
 
 step_09_eject_iso() {
@@ -148,41 +148,44 @@ step_11_summary() {
     bash "$STEPS_DIR/11-summary.sh"
 }
 
-# Execute steps asynchronously but wait for each to complete before continuing
+# Execute steps
 echo "Executing steps..."
 echo ""
 
-# Execute a step asynchronously and wait for completion
-run_step() {
+# Execute a step synchronously
+run_step_sync() {
     local step_name="$1"
     local step_func="$2"
 
     echo "Starting: $step_name"
 
-    # Run step in background
-    $step_func &
-    local pid=$!
-
-    # Wait for step to complete
-    if wait $pid; then
-        echo "  ✓ Completed (PID: $pid)"
+    if $step_func; then
+        echo "  ✓ Completed"
     else
-        echo "  ✗ Failed (PID: $pid)"
+        echo "  ✗ Failed"
         exit 1
     fi
     echo ""
 }
 
-run_step "01: Authenticate sudo" "step_01_authenticate_sudo"
-run_step "02: Check prerequisites" "step_02_check_prerequisites"
-run_step "03: Prepare ISO" "step_03_prepare_iso"
-run_step "04: Copy ISO to pool" "step_04_copy_iso_to_pool"
-run_step "05: Setup network" "step_05_setup_network"
-run_step "06: Cleanup VMs" "step_06_cleanup_vms"
-run_step "07: Start VMs" "step_07_start_vms"
-run_step "08: Wait for Talos boot" "step_08_wait_for_talos"
-run_step "09: Eject ISO" "step_09_eject_iso"
-run_step "10: Reboot and verify" "step_10_reboot_verify"
-run_step "11: Summary" "step_11_summary"
+# Steps 01-07: Run synchronously
+run_step_sync "01: Authenticate sudo" "step_01_authenticate_sudo"
+run_step_sync "02: Check prerequisites" "step_02_check_prerequisites"
+run_step_sync "03: Prepare ISO" "step_03_prepare_iso"
+run_step_sync "04: Copy ISO to pool" "step_04_copy_iso_to_pool"
+run_step_sync "05: Setup network" "step_05_setup_network"
+run_step_sync "06: Cleanup VMs" "step_06_cleanup_vms"
+run_step_sync "07: Start VMs" "step_07_start_vms"
+
+# Step 08: Source directly (preserves sudo context for virsh)
+echo "Starting: 08: Wait for Talos boot"
+step_08_wait_for_talos
+echo "  ✓ Completed"
+echo ""
+
+# Steps 09-11: Run synchronously
+run_step_sync "09: Eject ISO" "step_09_eject_iso"
+run_step_sync "10: Reboot and verify" "step_10_reboot_verify"
+run_step_sync "11: Summary" "step_11_summary"
 
 echo "=== VM Startup Complete ==="

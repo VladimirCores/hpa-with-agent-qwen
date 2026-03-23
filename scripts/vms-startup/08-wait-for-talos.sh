@@ -34,6 +34,59 @@ echo "  Waiting for Talos API to be accessible..."
 echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
 
+# Wait for VMs to be running and have DHCP leases
+echo "  > Waiting for VMs to be running..."
+VM_WAIT=0
+while [[ $VM_WAIT -lt 60 ]]; do
+    ALL_RUNNING=true
+    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+        VM_STATE=$(virsh -c "$LIBVIRT_URI" domstate "$vm_name" 2>/dev/null)
+        if [[ "$VM_STATE" != "running" ]]; then
+            ALL_RUNNING=false
+            if [[ "$VERBOSE" == "true" ]]; then
+                echo "    ⏳ $vm_name: $VM_STATE"
+            fi
+        fi
+    done
+
+    if [[ "$ALL_RUNNING" == "true" ]]; then
+        echo "  ✓ All VMs are running"
+        break
+    fi
+
+    sleep 2
+    VM_WAIT=$((VM_WAIT + 2))
+done
+
+if [[ "$ALL_RUNNING" != "true" ]]; then
+    echo "  WARNING: Not all VMs are running after 60s"
+fi
+
+# Wait for DHCP leases
+echo ""
+echo "  > Waiting for DHCP leases..."
+LEASE_WAIT=0
+while [[ $LEASE_WAIT -lt 60 ]]; do
+    mapfile -t VM_IPS < <(get_dhcp_ips "$NETWORK_NAME")
+    if [[ ${#VM_IPS[@]} -ge $WORKER_COUNT ]]; then
+        echo "  ✓ Found ${#VM_IPS[@]} DHCP leases: ${VM_IPS[*]}"
+        break
+    fi
+
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo "    ⏳ Found ${#VM_IPS[@]} leases, waiting for $WORKER_COUNT..."
+    fi
+
+    sleep 2
+    LEASE_WAIT=$((LEASE_WAIT + 2))
+done
+
+if [[ ${#VM_IPS[@]} -lt $WORKER_COUNT ]]; then
+    echo "  WARNING: Only ${#VM_IPS[@]} DHCP leases found, expected $WORKER_COUNT"
+fi
+
+echo ""
+
 # Initial network check
 if [[ "$VERBOSE" == "true" ]]; then
     echo "  > Getting DHCP leases for network: $NETWORK_NAME in $LIBVIRT_URI"
@@ -46,19 +99,10 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
 
     ALL_READY=true
     READY_COUNT=0
-    TOTAL_COUNT=0
-
-    # Get all IPs from libvirt network
-    if [[ "$VERBOSE" == "true" ]]; then
-        echo "  > Querying DHCP leases..."
-        echo "  > NETWORK_NAME=$NETWORK_NAME"
-        echo "  > LIBVIRT_URI=$LIBVIRT_URI"
-    fi
-    mapfile -t VM_IPS < <(libvirt_get_dhcp_ips -n "$NETWORK_NAME" -p ipv4 -r)
     TOTAL_COUNT=${#VM_IPS[@]}
 
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "  > Found ${TOTAL_COUNT} IPs: ${VM_IPS[*]}"
+        echo "  > Checking ${TOTAL_COUNT} IPs..."
     fi
 
     # Check each IP directly
