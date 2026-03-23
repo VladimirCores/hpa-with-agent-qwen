@@ -128,21 +128,36 @@ vagrant ssh talos-master
 
 ### vms-startup.sh
 
-The startup script performs the following steps:
+The startup script executes the following modular steps:
 
-1. **Sudo Authentication** - Authenticates and caches credentials for 15 minutes
-2. **Prerequisites Check** - Verifies Vagrantfile, vagrant-libvirt plugin, libvirtd
-3. **ISO Preparation** - Downloads Talos ISO if not present or corrupted
-4. **Storage Pool Setup** - Creates pool if needed, copies ISO
-5. **Network Setup** - Runs `prepare-network.sh` to create isolated network
-6. **Disk Cleanup** - Removes existing VM disks (ensures fresh install)
-7. **VM Startup** - Starts all VMs via Vagrant
-8. **Wait for Boot** - Waits for Talos to boot from ISO (API accessible)
-9. **ISO Ejection** - Ejects ISO from all VMs, sets boot order to disk-only
-10. **Reboot & Verify** - Reboots VMs and verifies they boot from disk
-11. **Summary** - Displays boot status and next steps
+| Step | Script                      | Description                                             |
+| ---- | --------------------------- | ------------------------------------------------------- |
+| 00   | `00-helper-functions.sh`    | Common functions (get_libvirt_ips, check_machine_ready) |
+| 01   | `01-authenticate-sudo.sh`   | Sudo authentication (cached for 15 min)                 |
+| 02   | `02-check-prerequisites.sh` | Verify Vagrantfile, vagrant-libvirt, libvirtd           |
+| 03   | `03-prepare-iso.sh`         | Download/verify Talos ISO                               |
+| 04   | `04-copy-iso-to-pool.sh`    | Copy ISO to storage pool                                |
+| 05   | `05-setup-network.sh`       | Run `prepare-network.sh`                                |
+| 06   | `06-cleanup-vms.sh`         | Remove old VM disks (unless `-s` flag)                  |
+| 07   | `07-start-vms.sh`           | Start VMs via Vagrant                                   |
+| 08   | `08-wait-for-talos.sh`      | Wait for Talos READY status                             |
+| 09   | `09-eject-iso.sh`           | Eject ISO, set disk-only boot                           |
+| 10   | `10-reboot-verify.sh`       | Reboot and verify disk boot                             |
+| 11   | `11-summary.sh`             | Display summary and next steps                          |
 
 **Total time**: ~5-10 minutes (includes Talos boot time + reboot verification)
+
+**Script structure**:
+
+```
+scripts/vms-startup.sh          # Main script (50 lines)
+scripts/vms-startup/
+├── 00-helper-functions.sh      # Common functions
+├── 01-authenticate-sudo.sh     # Step 1
+├── 02-check-prerequisites.sh   # Step 2
+├── ...
+└── 11-summary.sh               # Step 11
+```
 
 ### vms-cleanup.sh
 
