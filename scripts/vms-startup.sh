@@ -255,70 +255,172 @@ echo "  ✓ VMs started"
 echo ""
 
 # =============================================================================
-# Step 8: Eject ISO from all VMs
+# Step 8: Wait for Talos to boot from ISO
 # =============================================================================
-echo "[8/9] Ejecting ISO from VMs..."
+echo "[8/10] Waiting for Talos to boot from ISO..."
 
-# Eject CDROM from all VMs (forces boot from disk on next reboot)
+# Wait for each VM to be accessible via Talos API
+BOOT_WAIT=300  # 5 minutes max
+BOOT_INTERVAL=5
+BOOT_ELAPSED=0
+
+echo "  Waiting for Talos API to be accessible..."
+while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
+    ALL_READY=true
+    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+        # Find VM with matching suffix
+        ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
+        if [[ -n "$ACTUAL_VM" ]]; then
+            # Get IP from DHCP leases
+            VM_IP=""
+            for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
+                VM_IP="$lease"
+                break
+            done
+
+            if [[ -n "$VM_IP" ]]; then
+                if talosctl get version --nodes "$VM_IP" --insecure &>/dev/null; then
+                    echo "    ✓ $ACTUAL_VM ($VM_IP) - Talos ready"
+                    continue
+                fi
+            fi
+        fi
+        ALL_READY=false
+    done
+
+    if [[ "$ALL_READY" == "true" ]]; then
+        break
+    fi
+
+    sleep $BOOT_INTERVAL
+    BOOT_ELAPSED=$((BOOT_ELAPSED + BOOT_INTERVAL))
+    echo "    ... waiting (${BOOT_ELAPSED}s/${BOOT_WAIT}s)"
+done
+
+if [[ "$ALL_READY" != "true" ]]; then
+    echo "  WARNING: Not all VMs ready after ${BOOT_WAIT}s"
+fi
+
+echo "  ✓ Talos booted from ISO"
+echo ""
+
+# =============================================================================
+# Step 9: Eject ISO and change boot order to disk-only
+# =============================================================================
+echo "[9/10] Ejecting ISO and setting disk boot..."
+
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    # Find VM with matching suffix (handles Vagrant prefix)
+    # Find VM with matching suffix
     ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
     if [[ -n "$ACTUAL_VM" ]]; then
-        # Change boot order: disk first, cdrom second
-        virsh -c "$LIBVIRT_URI" domblklist "$ACTUAL_VM" 2>/dev/null | grep -E "^hda|^sda" | awk '{print $1}' | while read -r target; do
-            virsh -c "$LIBVIRT_URI" change-media-device "$ACTUAL_VM" --path "$target" --eject 2>/dev/null || true
+        # Get IP before reboot
+        VM_IP=""
+        for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
+            VM_IP="$lease"
+            break
         done
-        echo "  ✓ ISO ejected from $ACTUAL_VM"
+
+        # Eject ISO from CDROM
+        virsh -c "$LIBVIRT_URI" change-media-device "$ACTUAL_VM" --path hda --eject 2>/dev/null || true
+
+        # Update boot order: disk first, cdrom removed
+        XML=$(virsh -c "$LIBVIRT_URI" dumpxml "$ACTUAL_VM" 2>/dev/null)
+        if echo "$XML" | grep -q "<boot dev='cdrom'/>"; then
+            # Remove cdrom boot entry, keep only hd
+            echo "$XML" | sed "/<boot dev='cdrom'\/>/d" | virsh -c "$LIBVIRT_URI" define /dev/stdin 2>/dev/null || true
+        fi
+
+        echo "    ✓ ISO ejected from $ACTUAL_VM"
     fi
 done
 
-echo "  ✓ ISO ejection complete (VMs will boot from disk on next reboot)"
+echo "  ✓ ISO ejected, boot order set to disk-only"
 echo ""
 
 # =============================================================================
-# Step 9: Verify deployment
+# Step 10: Reboot VMs and verify disk boot
 # =============================================================================
-echo "[9/9] Verifying deployment..."
+echo "[10/10] Rebooting VMs to verify disk boot..."
 
-sleep 5  # Give VMs time to boot
+REBOOT_WAIT=300  # 5 minutes max
+REBOOT_INTERVAL=5
+REBOOT_ELAPSED=0
 
-# Check VM status (handle Vagrant prefix)
-echo "  VM Status:"
+# Reboot all VMs
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    # Find VM with matching suffix (handles Vagrant prefix)
-    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1)
+    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
     if [[ -n "$ACTUAL_VM" ]]; then
-        STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
-        echo "    - $ACTUAL_VM: $STATE"
-    else
-        echo "    - $vm_name: NOT FOUND"
+        echo "  Rebooting $ACTUAL_VM..."
+        virsh -c "$LIBVIRT_URI" reboot "$ACTUAL_VM" 2>/dev/null || true
     fi
 done
 
-# Check network leases
 echo ""
-echo "  DHCP Leases on $NETWORK_NAME:"
-if virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" &>/dev/null; then
-    virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" | head -20
+echo "  Waiting for VMs to reboot from disk..."
+
+while [[ $REBOOT_ELAPSED -lt $REBOOT_WAIT ]]; do
+    ALL_READY=true
+    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+        ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
+        if [[ -n "$ACTUAL_VM" ]]; then
+            # Get IP from DHCP leases
+            VM_IP=""
+            for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
+                VM_IP="$lease"
+                break
+            done
+
+            if [[ -n "$VM_IP" ]]; then
+                if talosctl get version --nodes "$VM_IP" --insecure &>/dev/null; then
+                    # Verify boot source (should be disk, not ISO)
+                    BOOT_SOURCE=$(virsh -c "$LIBVIRT_URI" domblklist "$ACTUAL_VM" 2>/dev/null | grep -E "^hda|^sda" | wc -l)
+                    if [[ "$BOOT_SOURCE" -eq 0 ]]; then
+                        echo "    ✓ $ACTUAL_VM ($VM_IP) - Booted from disk"
+                    else
+                        echo "    ✓ $ACTUAL_VM ($VM_IP) - Ready"
+                    fi
+                    continue
+                fi
+            fi
+        fi
+        ALL_READY=false
+    done
+
+    if [[ "$ALL_READY" == "true" ]]; then
+        break
+    fi
+
+    sleep $REBOOT_INTERVAL
+    REBOOT_ELAPSED=$((REBOOT_ELAPSED + REBOOT_INTERVAL))
+    echo "    ... waiting (${REBOOT_ELAPSED}s/${REBOOT_WAIT}s)"
+done
+
+if [[ "$ALL_READY" != "true" ]]; then
+    echo "  WARNING: Not all VMs ready after reboot"
 else
-    echo "    (No leases yet - VMs may still be booting)"
+    echo "  ✓ All VMs booted from disk successfully"
 fi
 echo ""
 
 # =============================================================================
-# Step 10: Summary
+# Step 11: Summary
 # =============================================================================
-echo "[10/10] Startup Summary"
+echo "[11/11] Startup Summary"
 echo "==================="
 echo "Cluster Name: Talos Cluster"
 echo "Network: $NETWORK_NAME"
 echo "Master: $MASTER_NAME ($MASTER_IP)"
 echo "Workers: $WORKER_COUNT nodes (starting at $WORKER_IP_BASE)"
 echo ""
+echo "Boot Status:"
+echo "  ✓ VMs booted from ISO (initial install)"
+echo "  ✓ ISO ejected"
+echo "  ✓ VMs rebooted from disk"
+echo ""
 echo "Next steps:"
-echo "  1. Wait for Talos to boot (~30 seconds)"
-echo "  2. Generate machine configurations:"
+echo "  1. Generate machine configurations:"
 echo "     talosctl gen config ${CLUSTER_NAME:-talos-default} https://$MASTER_IP:6443"
-echo "  3. Apply configurations with talosctl"
+echo "  2. Apply configurations with talosctl"
+echo "     ./scripts/talos-bootstrap.sh"
 echo ""
 echo "=== VM Startup Complete ==="

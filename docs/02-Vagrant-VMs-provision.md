@@ -137,9 +137,12 @@ The startup script performs the following steps:
 5. **Network Setup** - Runs `prepare-network.sh` to create isolated network
 6. **Disk Cleanup** - Removes existing VM disks (ensures fresh install)
 7. **VM Startup** - Starts all VMs via Vagrant
-8. **ISO Ejection** - Ejects ISO from all VMs (forces disk boot on reboot)
-9. **Verification** - Checks VM status and DHCP leases
-10. **Summary** - Displays next steps
+8. **Wait for Boot** - Waits for Talos to boot from ISO (API accessible)
+9. **ISO Ejection** - Ejects ISO from all VMs, sets boot order to disk-only
+10. **Reboot & Verify** - Reboots VMs and verifies they boot from disk
+11. **Summary** - Displays boot status and next steps
+
+**Total time**: ~5-10 minutes (includes Talos boot time + reboot verification)
 
 ### vms-cleanup.sh
 
