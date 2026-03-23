@@ -140,9 +140,9 @@ The startup script executes the following modular steps:
 | 05   | `05-setup-network.sh`       | Run `prepare-network.sh`                                |
 | 06   | `06-cleanup-vms.sh`         | Remove old VM disks (unless `-s` flag)                  |
 | 07   | `07-start-vms.sh`           | Start VMs via Vagrant                                   |
-| 08   | `08-wait-for-talos.sh`      | Wait for Talos READY status                             |
-| 09   | `09-eject-iso.sh`           | Eject ISO, set disk-only boot                           |
-| 10   | `10-reboot-verify.sh`       | Reboot and verify disk boot                             |
+| 08   | `08-wait-for-talos.sh`      | Wait for Talos READY (polls IPs directly)               |
+| 09   | `09-eject-iso.sh`           | Eject ISO from all VMs, set disk boot                   |
+| 10   | `10-reboot-verify.sh`       | Reboot VMs, verify disk boot (polls IPs)                |
 | 11   | `11-summary.sh`             | Display summary and next steps                          |
 
 **Total time**: ~5-10 minutes (includes Talos boot time + reboot verification)
@@ -153,11 +153,25 @@ The startup script executes the following modular steps:
 scripts/vms-startup.sh          # Main script (50 lines)
 scripts/vms-startup/
 ├── 00-helper-functions.sh      # Common functions
-├── 01-authenticate-sudo.sh     # Step 1
-├── 02-check-prerequisites.sh   # Step 2
-├── ...
-└── 11-summary.sh               # Step 11
+├── 01-authenticate-sudo.sh     # Step 1: Sudo auth
+├── 02-check-prerequisites.sh   # Step 2: Prerequisites
+├── 03-prepare-iso.sh           # Step 3: ISO preparation
+├── 04-copy-iso-to-pool.sh      # Step 4: Copy ISO
+├── 05-setup-network.sh         # Step 5: Network setup
+├── 06-cleanup-vms.sh           # Step 6: Cleanup disks
+├── 07-start-vms.sh             # Step 7: Start VMs
+├── 08-wait-for-talos.sh        # Step 8: Wait for READY
+├── 09-eject-iso.sh             # Step 9: Eject ISO
+├── 10-reboot-verify.sh         # Step 10: Reboot & verify
+└── 11-summary.sh               # Step 11: Summary
 ```
+
+**Key improvements**:
+
+- Steps 08-10 use `get_libvirt_ips()` to get IPs directly
+- No complex VM name ↔ IP matching logic
+- Faster execution (fewer virsh calls)
+- Simpler, more maintainable code
 
 ### vms-cleanup.sh
 
