@@ -143,52 +143,41 @@ step_11_summary() {
     bash "$STEPS_DIR/11-summary.sh"
 }
 
-# Execute steps synchronously (one by one, waiting for each to complete)
+# Execute steps asynchronously but wait for each to complete before continuing
 echo "Executing steps..."
 echo ""
 
-echo "Step 1/11: Authenticate sudo"
-step_01_authenticate_sudo
-echo ""
+# Execute a step asynchronously and wait for completion
+run_step() {
+    local step_name="$1"
+    local step_func="$2"
 
-echo "Step 2/11: Check prerequisites"
-step_02_check_prerequisites
-echo ""
+    echo "Starting: $step_name"
 
-echo "Step 3/11: Prepare ISO"
-step_03_prepare_iso
-echo ""
+    # Run step in background
+    $step_func &
+    local pid=$!
 
-echo "Step 4/11: Copy ISO to pool"
-step_04_copy_iso_to_pool
-echo ""
+    # Wait for step to complete
+    if wait $pid; then
+        echo "  ✓ Completed (PID: $pid)"
+    else
+        echo "  ✗ Failed (PID: $pid)"
+        exit 1
+    fi
+    echo ""
+}
 
-echo "Step 5/11: Setup network"
-step_05_setup_network
-echo ""
-
-echo "Step 6/11: Cleanup VMs"
-step_06_cleanup_vms
-echo ""
-
-echo "Step 7/11: Start VMs"
-step_07_start_vms
-echo ""
-
-echo "Step 8/11: Wait for Talos boot"
-step_08_wait_for_talos
-echo ""
-
-echo "Step 9/11: Eject ISO"
-step_09_eject_iso
-echo ""
-
-echo "Step 10/11: Reboot and verify"
-step_10_reboot_verify
-echo ""
-
-echo "Step 11/11: Summary"
-step_11_summary
-echo ""
+run_step "01: Authenticate sudo" "step_01_authenticate_sudo"
+run_step "02: Check prerequisites" "step_02_check_prerequisites"
+run_step "03: Prepare ISO" "step_03_prepare_iso"
+run_step "04: Copy ISO to pool" "step_04_copy_iso_to_pool"
+run_step "05: Setup network" "step_05_setup_network"
+run_step "06: Cleanup VMs" "step_06_cleanup_vms"
+run_step "07: Start VMs" "step_07_start_vms"
+run_step "08: Wait for Talos boot" "step_08_wait_for_talos"
+run_step "09: Eject ISO" "step_09_eject_iso"
+run_step "10: Reboot and verify" "step_10_reboot_verify"
+run_step "11: Summary" "step_11_summary"
 
 echo "=== VM Startup Complete ==="

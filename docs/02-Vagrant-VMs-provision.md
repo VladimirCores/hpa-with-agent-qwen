@@ -147,30 +147,18 @@ The startup script calls each step as a **function** with explicit parameters fr
 **Execution flow**:
 
 ```
-Step 01: Synchronous (wait for completion)
+Step 01: Async + Wait → completes
      ↓
-Step 02: Synchronous (wait for completion)
+Step 02: Async + Wait → completes
      ↓
-Step 03: Synchronous (wait for completion)
+Step 03: Async + Wait → completes
      ↓
-Step 04: Synchronous (wait for completion)
+...
      ↓
-Step 05: Synchronous (wait for completion)
-     ↓
-Step 06: Synchronous (wait for completion)
-     ↓
-Step 07: Synchronous (wait for completion)
-     ↓
-Step 08: Synchronous (wait for completion)
-     ↓
-Step 09: Synchronous (wait for completion)
-     ↓
-Step 10: Synchronous (wait for completion)
-     ↓
-Step 11: Synchronous (wait for completion)
+Step 11: Async + Wait → completes
 ```
 
-**Important**: Each step completes fully before the next step begins.
+**Important**: Each step runs in a separate process (async) but script waits for completion before starting the next step.
 
 **Usage**:
 
@@ -198,7 +186,8 @@ Step 11: Synchronous (wait for completion)
 - Explicit parameter passing
 - Easy to test individual steps
 - No shared state between steps
-- Simple, linear execution flow
+- Each step runs in separate process (async)
+- Automatic cleanup on step failure
   **Helper function usage**:
 
 ```bash
