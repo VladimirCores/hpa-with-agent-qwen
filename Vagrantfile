@@ -50,12 +50,12 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
       domain.memory = memory_mb
       domain.cpus = cpus
 
-      # Boot from disk (Talos installed) with ISO as fallback for first boot
+      # Boot from ISO first (for installation), then disk
       domain.storage :file,
                      device: :cdrom,
                      path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
-      domain.boot 'hd'  # Try disk first
-      domain.boot 'cdrom'  # Fallback to ISO
+      domain.boot 'cdrom'  # Boot from ISO first
+      domain.boot 'hd'     # Then disk
 
       # Persistent disk
       domain.storage :file, size: '5G', bus: 'virtio', cache: 'none'
