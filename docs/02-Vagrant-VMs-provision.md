@@ -135,10 +135,11 @@ The startup script performs the following steps:
 3. **ISO Preparation** - Downloads Talos ISO if not present or corrupted
 4. **Storage Pool Setup** - Creates pool if needed, copies ISO
 5. **Network Setup** - Runs `prepare-network.sh` to create isolated network
-6. **Cleanup** - Removes existing VMs (unless `-s` flag used)
+6. **Disk Cleanup** - Removes existing VM disks (ensures fresh install)
 7. **VM Startup** - Starts all VMs via Vagrant
-8. **Verification** - Checks VM status and DHCP leases
-9. **Summary** - Displays next steps
+8. **ISO Ejection** - Ejects ISO from all VMs (forces disk boot on reboot)
+9. **Verification** - Checks VM status and DHCP leases
+10. **Summary** - Displays next steps
 
 ### vms-cleanup.sh
 

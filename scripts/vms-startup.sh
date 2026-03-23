@@ -255,9 +255,30 @@ echo "  ✓ VMs started"
 echo ""
 
 # =============================================================================
-# Step 8: Verify deployment
+# Step 8: Eject ISO from all VMs
 # =============================================================================
-echo "[8/9] Verifying deployment..."
+echo "[8/9] Ejecting ISO from VMs..."
+
+# Eject CDROM from all VMs (forces boot from disk on next reboot)
+for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+    # Find VM with matching suffix (handles Vagrant prefix)
+    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
+    if [[ -n "$ACTUAL_VM" ]]; then
+        # Change boot order: disk first, cdrom second
+        virsh -c "$LIBVIRT_URI" domblklist "$ACTUAL_VM" 2>/dev/null | grep -E "^hda|^sda" | awk '{print $1}' | while read -r target; do
+            virsh -c "$LIBVIRT_URI" change-media-device "$ACTUAL_VM" --path "$target" --eject 2>/dev/null || true
+        done
+        echo "  ✓ ISO ejected from $ACTUAL_VM"
+    fi
+done
+
+echo "  ✓ ISO ejection complete (VMs will boot from disk on next reboot)"
+echo ""
+
+# =============================================================================
+# Step 9: Verify deployment
+# =============================================================================
+echo "[9/9] Verifying deployment..."
 
 sleep 5  # Give VMs time to boot
 
@@ -285,9 +306,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 9: Summary
+# Step 10: Summary
 # =============================================================================
-echo "[9/9] Startup Summary"
+echo "[10/10] Startup Summary"
 echo "==================="
 echo "Cluster Name: Talos Cluster"
 echo "Network: $NETWORK_NAME"
