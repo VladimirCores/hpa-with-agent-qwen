@@ -40,11 +40,20 @@ VM_WAIT=0
 while [[ $VM_WAIT -lt 60 ]]; do
     ALL_RUNNING=true
     for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-        VM_STATE=$(virsh -c "$LIBVIRT_URI" domstate "$vm_name" 2>/dev/null)
-        if [[ "$VM_STATE" != "running" ]]; then
+        # Find VM with matching suffix (handles Vagrant prefix)
+        ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1)
+        if [[ -n "$ACTUAL_VM" ]]; then
+            VM_STATE=$(virsh -c "$LIBVIRT_URI" domstate "$ACTUAL_VM" 2>/dev/null)
+            if [[ "$VM_STATE" != "running" ]]; then
+                ALL_RUNNING=false
+                if [[ "$VERBOSE" == "true" ]]; then
+                    echo "    ⏳ $ACTUAL_VM: $VM_STATE"
+                fi
+            fi
+        else
             ALL_RUNNING=false
             if [[ "$VERBOSE" == "true" ]]; then
-                echo "    ⏳ $vm_name: $VM_STATE"
+                echo "    ⏳ $vm_name: not found"
             fi
         fi
     done
