@@ -22,6 +22,158 @@ BOOT_INTERVAL=5
 BOOT_ELAPSED=0
 VERBOSE="${VERBOSE:-true}"
 
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+# Log verbose message (only if VERBOSE=true)
+# Usage: log_verbose <message>
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo "$@"
+    fi
+}
+
+# Log info message (always shown)
+# Usage: log_info <message>
+log_info() {
+    echo "$@"
+}
+
+# Log warning message
+# Usage: log_warning <message>
+log_warning() {
+    echo "  WARNING: $*"
+}
+
+# Find VM by name pattern (handles Vagrant prefix)
+# Usage: find_vm_by_name <vm_name>
+# Returns: Actual VM name or empty string
+find_vm_by_name() {
+    local vm_name="$1"
+    virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | \
+        grep -E "${vm_name}[^0-9]*\s" | \
+        awk '{print $2}' | head -1
+}
+
+# Wait for all VMs to be in running state
+# Usage: wait_for_vms_running [timeout_seconds]
+# Returns: 0 if all running, 1 if timeout
+wait_for_vms_running() {
+    local timeout="${1:-60}"
+    local wait_time=0
+
+    log_info "Waiting for VMs to be running..."
+
+    while [[ $wait_time -lt $timeout ]]; do
+        local all_running=true
+
+        for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+            local actual_vm
+            actual_vm=$(find_vm_by_name "$vm_name")
+
+            if [[ -n "$actual_vm" ]]; then
+                local vm_state
+                vm_state=$(virsh -c "$LIBVIRT_URI" domstate "$actual_vm" 2>/dev/null)
+
+                if [[ "$vm_state" != "running" ]]; then
+                    all_running=false
+                    log_verbose "  ⏳ $actual_vm: $vm_state"
+                fi
+            else
+                all_running=false
+                log_verbose "  ⏳ $vm_name: not found"
+            fi
+        done
+
+        if [[ "$all_running" == "true" ]]; then
+            log_info "  ✓ All VMs are running"
+            return 0
+        fi
+
+        sleep 2
+        wait_time=$((wait_time + 2))
+    done
+
+    log_warning "Not all VMs are running after ${timeout}s"
+    return 1
+}
+
+# Wait for DHCP leases to appear
+# Usage: wait_for_dhcp_leases [min_leases] [timeout_seconds]
+# Sets: VM_IPS array with discovered IPs
+# Returns: 0 if enough leases, 1 if timeout
+wait_for_dhcp_leases() {
+    local min_leases="${1:-$WORKER_COUNT}"
+    local timeout="${2:-60}"
+    local wait_time=0
+
+    log_info "Waiting for DHCP leases..."
+
+    while [[ $wait_time -lt $timeout ]]; do
+        mapfile -t VM_IPS < <(get_dhcp_ips "$NETWORK_NAME")
+
+        if [[ ${#VM_IPS[@]} -ge $min_leases ]]; then
+            log_info "  ✓ Found ${#VM_IPS[@]} DHCP leases: ${VM_IPS[*]}"
+            return 0
+        fi
+
+        log_verbose "  ⏳ Found ${#VM_IPS[@]} leases, waiting for $min_leases..."
+
+        sleep 2
+        wait_time=$((wait_time + 2))
+    done
+
+    log_warning "Only ${#VM_IPS[@]} DHCP leases found, expected $min_leases"
+    return 1
+}
+
+# Check if all Talos machines are READY
+# Usage: check_all_machines_ready <ip1> [ip2] [ip3] ...
+# Returns: 0 if all ready, 1 if any not ready
+check_all_machines_ready() {
+    local ips=("$@")
+    local all_ready=true
+
+    for ip in "${ips[@]}"; do
+        if [[ -n "$ip" ]]; then
+            local machine_ready
+            machine_ready=$(check_machine_ready "$ip")
+
+            if [[ "$machine_ready" == "true" ]]; then
+                log_info "    ✓ $ip - Machine READY"
+            else
+                if [[ -n "$machine_ready" ]]; then
+                    log_verbose "  ⏳ $ip - Machine status: $machine_ready"
+                else
+                    log_verbose "  ⏳ $ip - Waiting for machine status"
+                fi
+                all_ready=false
+            fi
+        fi
+    done
+
+    if [[ "$all_ready" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Display DHCP leases (verbose mode only)
+# Usage: show_dhcp_leases
+show_dhcp_leases() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        log_info "Getting DHCP leases for network: $NETWORK_NAME in $LIBVIRT_URI"
+        virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null || log_info "  > No leases found"
+        echo ""
+    fi
+}
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
 echo "[8/12] Waiting for Talos to boot from ISO..."
 echo "  Configuration:"
 echo "    Timeout: ${BOOT_WAIT}s"
@@ -29,146 +181,62 @@ echo "    Interval: ${BOOT_INTERVAL}s"
 echo "    Verbose: $VERBOSE"
 echo ""
 
-# Wait for each VM to be accessible via Talos API
-echo "  Waiting for Talos API to be accessible..."
-echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
+log_info "Waiting for Talos API to be accessible..."
+log_info "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
 
-# Wait for VMs to be running and have DHCP leases
-echo "  > Waiting for VMs to be running..."
-VM_WAIT=0
-while [[ $VM_WAIT -lt 60 ]]; do
-    ALL_RUNNING=true
-    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-        # Find VM with matching suffix (handles Vagrant prefix)
-        ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1)
-        if [[ -n "$ACTUAL_VM" ]]; then
-            VM_STATE=$(virsh -c "$LIBVIRT_URI" domstate "$ACTUAL_VM" 2>/dev/null)
-            if [[ "$VM_STATE" != "running" ]]; then
-                ALL_RUNNING=false
-                if [[ "$VERBOSE" == "true" ]]; then
-                    echo "    ⏳ $ACTUAL_VM: $VM_STATE"
-                fi
-            fi
-        else
-            ALL_RUNNING=false
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "    ⏳ $vm_name: not found"
-            fi
-        fi
-    done
-
-    if [[ "$ALL_RUNNING" == "true" ]]; then
-        echo "  ✓ All VMs are running"
-        break
-    fi
-
-    sleep 2
-    VM_WAIT=$((VM_WAIT + 2))
-done
-
-if [[ "$ALL_RUNNING" != "true" ]]; then
-    echo "  WARNING: Not all VMs are running after 60s"
-fi
-
-# Wait for DHCP leases
-echo ""
-echo "  > Waiting for DHCP leases..."
-LEASE_WAIT=0
-while [[ $LEASE_WAIT -lt 60 ]]; do
-    mapfile -t VM_IPS < <(get_dhcp_ips "$NETWORK_NAME")
-    if [[ ${#VM_IPS[@]} -ge $WORKER_COUNT ]]; then
-        echo "  ✓ Found ${#VM_IPS[@]} DHCP leases: ${VM_IPS[*]}"
-        break
-    fi
-
-    if [[ "$VERBOSE" == "true" ]]; then
-        echo "    ⏳ Found ${#VM_IPS[@]} leases, waiting for $WORKER_COUNT..."
-    fi
-
-    sleep 2
-    LEASE_WAIT=$((LEASE_WAIT + 2))
-done
-
-if [[ ${#VM_IPS[@]} -lt $WORKER_COUNT ]]; then
-    echo "  WARNING: Only ${#VM_IPS[@]} DHCP leases found, expected $WORKER_COUNT"
-fi
-
+# Phase 1: Wait for VMs to be running
+wait_for_vms_running 60
 echo ""
 
-# Initial network check
-if [[ "$VERBOSE" == "true" ]]; then
-    echo "  > Getting DHCP leases for network: $NETWORK_NAME in $LIBVIRT_URI"
-    virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null || echo "  > No leases found"
-    echo ""
-fi
+# Phase 2: Wait for DHCP leases
+wait_for_dhcp_leases "$WORKER_COUNT" 60
+echo ""
 
+# Phase 3: Show initial DHCP leases (verbose)
+show_dhcp_leases
+
+# Phase 4: Poll Talos machines until all are READY
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
-    echo "  [${BOOT_ELAPSED}s] Checking VM status..."
+    log_info "  [${BOOT_ELAPSED}s] Checking VM status..."
 
-    ALL_READY=true
-    READY_COUNT=0
-    TOTAL_COUNT=${#VM_IPS[@]}
+    total_count=${#VM_IPS[@]}
+    log_verbose "  > Checking ${total_count} IPs..."
 
-    if [[ "$VERBOSE" == "true" ]]; then
-        echo "  > Checking ${TOTAL_COUNT} IPs..."
+    if check_all_machines_ready "${VM_IPS[@]}"; then
+        echo ""
+        log_info "  Progress: ${#VM_IPS[@]}/${total_count} VMs ready"
+        echo ""
+        log_info "  All VMs ready!"
+        break
     fi
 
-    # Check each IP directly
-    for vm_ip in "${VM_IPS[@]}"; do
-        if [[ -n "$vm_ip" ]]; then
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "  > Checking machine status for IP: $vm_ip"
-            fi
-
-            # Check machine READY status
-            MACHINE_READY=$(check_machine_ready "$vm_ip")
-
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "  > Machine READY status for $vm_ip: $MACHINE_READY"
-            fi
-
-            if [[ "$MACHINE_READY" == "true" ]]; then
-                echo "    ✓ $vm_ip - Machine READY"
-                READY_COUNT=$((READY_COUNT + 1))
-            else
-                if [[ -n "$MACHINE_READY" ]]; then
-                    echo "    ⏳ $vm_ip - Machine status: $MACHINE_READY"
-                else
-                    echo "    ⏳ $vm_ip - Waiting for machine status"
-                fi
-                ALL_READY=false
-            fi
-        else
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "  > Skipping empty IP"
+    # Count ready machines for progress display
+    ready_count=0
+    for ip in "${VM_IPS[@]}"; do
+        if [[ -n "$ip" ]]; then
+            machine_ready=$(check_machine_ready "$ip")
+            if [[ "$machine_ready" == "true" ]]; then
+                ready_count=$((ready_count + 1))
             fi
         fi
     done
 
-    if [[ "$ALL_READY" == "true" ]]; then
-        echo ""
-        echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
-        echo ""
-        echo "  All VMs ready!"
-        break
-    else
-        echo ""
-        echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
-        echo ""
-    fi
+    echo ""
+    log_info "  Progress: ${ready_count}/${total_count} VMs ready"
+    echo ""
 
     sleep $BOOT_INTERVAL
     BOOT_ELAPSED=$((BOOT_ELAPSED + BOOT_INTERVAL))
 done
 
-if [[ "$ALL_READY" != "true" ]]; then
-    echo "  WARNING: Not all VMs ready after ${BOOT_WAIT}s"
+if [[ $BOOT_ELAPSED -ge $BOOT_WAIT ]]; then
+    log_warning "Not all VMs ready after ${BOOT_WAIT}s"
     echo "  Check VM console logs: virsh -c qemu:///system console <vm-name>"
     echo ""
     echo "  Continuing anyway (VMs may need more time)..."
 fi
 
 echo ""
-echo "  ✓ Talos booted from ISO"
+log_info "  ✓ Talos booted from ISO"
 echo ""
