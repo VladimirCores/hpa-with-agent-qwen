@@ -268,20 +268,16 @@ echo "  Waiting for Talos API to be accessible..."
 echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
 
-# Function to check if Talos API is accessible (with short timeout)
-check_talos_api() {
+# Function to check if Talos machine is ready
+check_machine_ready() {
     local ip="$1"
-    # Use timeout with talosctl get version
-    timeout 2 talosctl get version --nodes "$ip" --insecure &>/dev/null
-    return $?
-}
-
-# Function to check if Talos services are running
-check_talos_services() {
-    local ip="$1"
-    # Try to get services list (faster than get version for some cases)
-    timeout 2 talosctl services --nodes "$ip" --insecure &>/dev/null
-    return $?
+    # Get machine status and check for READY state
+    local status
+    status=$(timeout 3 talosctl -n "$ip" get machinestatus --insecure 2>/dev/null | grep "READY" | awk '{print $2}')
+    if [[ "$status" == "true" ]]; then
+        return 0
+    fi
+    return 1
 }
 
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
@@ -309,16 +305,19 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
             done
 
             if [[ -n "$VM_IP" ]]; then
-                # Check Talos API accessibility with get version
-                if check_talos_api "$VM_IP"; then
-                    echo "    ✓ $ACTUAL_VM ($VM_IP) - Talos API ready"
+                # Check machine READY status
+                if check_machine_ready "$VM_IP"; then
+                    echo "    ✓ $ACTUAL_VM ($VM_IP) - Machine READY"
                     READY_COUNT=$((READY_COUNT + 1))
                     continue
-                # Fallback: Try services check
-                elif check_talos_services "$VM_IP"; then
-                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Services responding, API starting (state: $VM_STATE)"
                 else
-                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Talos API not responding (state: $VM_STATE)"
+                    # Get current machine status for more info
+                    MACHINE_STATUS=$(timeout 2 talosctl -n "$VM_IP" get machinestatus --insecure 2>/dev/null | grep "READY" | awk '{print $2}')
+                    if [[ -n "$MACHINE_STATUS" ]]; then
+                        echo "    ⏳ $ACTUAL_VM ($VM_IP) - Machine status: $MACHINE_STATUS (state: $VM_STATE)"
+                    else
+                        echo "    ⏳ $ACTUAL_VM ($VM_IP) - Waiting for machine status (state: $VM_STATE)"
+                    fi
                 fi
             else
                 echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
