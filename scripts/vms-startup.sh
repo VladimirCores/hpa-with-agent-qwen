@@ -168,7 +168,7 @@ if [[ "$EXECUTE" == "false" ]]; then
     echo "  5. step_05_setup_network"
     echo "  6. step_06_cleanup_vms"
     echo "  7. step_07_start_vms"
-    echo "  8. step_08_wait_for_talos"
+    echo "  8. step_08_wait_for_talos (async with -a flag)"
     echo "  9. step_09_eject_iso"
     echo " 10. step_10_reboot_verify"
     echo " 11. step_11_summary"
@@ -178,10 +178,6 @@ fi
 
 echo "Executing steps..."
 echo ""
-
-# Track PIDs for async execution
-declare -a STEP_PIDS=()
-declare -a STEP_NAMES=()
 
 # Execute a step (sync or async)
 execute_step() {
@@ -193,9 +189,14 @@ execute_step() {
 
     if [[ "$run_async" == "true" ]]; then
         $step_func &
-        STEP_PIDS+=($!)
-        STEP_NAMES+=("$step_name")
-        echo "  → Running async (PID: ${STEP_PIDS[-1]})"
+        local pid=$!
+        echo "  → Running async (PID: $pid)"
+        wait $pid
+        if [[ $? -ne 0 ]]; then
+            echo "  ✗ Failed"
+            return 1
+        fi
+        echo "  ✓ Completed"
     else
         if $step_func; then
             echo "  ✓ Completed"
@@ -216,31 +217,32 @@ execute_step "05: Setup network" "step_05_setup_network" "false"
 execute_step "06: Cleanup VMs" "step_06_cleanup_vms" "false"
 execute_step "07: Start VMs" "step_07_start_vms" "false"
 
-# Step 08: Run asynchronously (waiting for Talos boot)
-execute_step "08: Wait for Talos boot" "step_08_wait_for_talos" "$ASYNC"
-
-# If step 08 was async, wait for it
-if [[ "$ASYNC" == "true" && ${#STEP_PIDS[@]} -gt 0 ]]; then
-    echo "Waiting for async step 08 to complete..."
-    FAILED=0
-    for i in "${!STEP_PIDS[@]}"; do
-        pid=${STEP_PIDS[$i]}
-        if ! wait $pid; then
-            echo "✗ ${STEP_NAMES[$i]} failed (PID: $pid)"
-            FAILED=$((FAILED + 1))
-        else
-            echo "✓ ${STEP_NAMES[$i]} completed (PID: $pid)"
-        fi
-    done
-
-    if [[ $FAILED -gt 0 ]]; then
-        echo ""
-        echo "WARNING: $FAILED async step(s) failed"
-    fi
+# Step 08: Run asynchronously but WAIT for completion before continuing
+echo "Starting: 08: Wait for Talos boot"
+if [[ "$ASYNC" == "true" ]]; then
+    echo "  → Running async, will wait for completion..."
+    step_08_wait_for_talos &
+    STEP08_PID=$!
+    echo "  → PID: $STEP08_PID"
     echo ""
+    echo "Waiting for step 08 to complete..."
+    if ! wait $STEP08_PID; then
+        echo "✗ Step 08 failed (PID: $STEP08_PID)"
+        exit 1
+    fi
+    echo "✓ Step 08 completed (PID: $STEP08_PID)"
+else
+    echo "  → Running sync..."
+    echo ""
+    if ! step_08_wait_for_talos; then
+        echo "✗ Step 08 failed"
+        exit 1
+    fi
+    echo "✓ Step 08 completed"
 fi
+echo ""
 
-# Steps 09-11: Run synchronously
+# Steps 09-11: Run synchronously (only after step 08 completes)
 execute_step "09: Eject ISO" "step_09_eject_iso" "false"
 execute_step "10: Reboot and verify" "step_10_reboot_verify" "false"
 execute_step "11: Summary" "step_11_summary" "false"
