@@ -255,6 +255,27 @@ echo "  ✓ VMs started"
 echo ""
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Get IPs from libvirt network
+get_libvirt_ips() {
+  local network="${1:-default}"
+  local proto="${2:-all}"  # ipv4, ipv6, all
+
+  local filter="NR > 2"
+  case "$proto" in
+    ipv4) filter="$filter && \$4 == \"ipv4\"" ;;
+    ipv6) filter="$filter && \$4 == \"ipv6\"" ;;
+    all)  filter="$filter" ;;
+    *)    echo "Invalid protocol: $proto" >&2; return 1 ;;
+  esac
+
+  virsh -c "qemu:///system" net-dhcp-leases "$network" 2>/dev/null | \
+    awk "$filter { gsub(\"/.*\", \"\", \$5); print \$5 }"
+}
+
+# =============================================================================
 # Step 8: Wait for Talos to boot from ISO
 # =============================================================================
 echo "[8/11] Waiting for Talos to boot from ISO..."
@@ -288,6 +309,9 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
     READY_COUNT=0
     TOTAL_COUNT=0
 
+    # Get all IPs from libvirt network
+    mapfile -t VM_IPS < <(get_libvirt_ips "$NETWORK_NAME" "ipv4")
+
     for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
         TOTAL_COUNT=$((TOTAL_COUNT + 1))
 
@@ -298,11 +322,18 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
             # Get VM state
             VM_STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
 
-            # Get IP from DHCP leases
+            # Get IP for this VM from the list
             VM_IP=""
-            for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
-                VM_IP="$lease"
-                break
+            for ip in "${VM_IPS[@]}"; do
+                # Check if this IP belongs to this VM by checking MAC address
+                VM_MAC=$(virsh -c "$LIBVIRT_URI" domifaddr "$ACTUAL_VM" 2>/dev/null | grep -v "^-" | awk '{print $2}' | head -1)
+                if [[ -n "$VM_MAC" ]]; then
+                    LEASE_MAC=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep "$ip" | awk '{print $2}')
+                    if [[ "$VM_MAC" == "$LEASE_MAC" ]]; then
+                        VM_IP="$ip"
+                        break
+                    fi
+                fi
             done
 
             if [[ -n "$VM_IP" ]]; then
@@ -358,15 +389,24 @@ echo ""
 # =============================================================================
 echo "[9/10] Ejecting ISO and setting disk boot..."
 
+# Get all IPs from libvirt network
+mapfile -t VM_IPS < <(get_libvirt_ips "$NETWORK_NAME" "ipv4")
+
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
     # Find VM with matching suffix
     ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
     if [[ -n "$ACTUAL_VM" ]]; then
-        # Get IP before reboot
+        # Get IP for this VM from the list
         VM_IP=""
-        for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
-            VM_IP="$lease"
-            break
+        for ip in "${VM_IPS[@]}"; do
+            VM_MAC=$(virsh -c "$LIBVIRT_URI" domifaddr "$ACTUAL_VM" 2>/dev/null | grep -v "^-" | awk '{print $2}' | head -1)
+            if [[ -n "$VM_MAC" ]]; then
+                LEASE_MAC=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep "$ip" | awk '{print $2}')
+                if [[ "$VM_MAC" == "$LEASE_MAC" ]]; then
+                    VM_IP="$ip"
+                    break
+                fi
+            fi
         done
 
         # Eject ISO from CDROM
@@ -417,6 +457,9 @@ while [[ $REBOOT_ELAPSED -lt $REBOOT_WAIT ]]; do
     READY_COUNT=0
     TOTAL_COUNT=0
 
+    # Get all IPs from libvirt network
+    mapfile -t VM_IPS < <(get_libvirt_ips "$NETWORK_NAME" "ipv4")
+
     for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
         TOTAL_COUNT=$((TOTAL_COUNT + 1))
 
@@ -426,11 +469,17 @@ while [[ $REBOOT_ELAPSED -lt $REBOOT_WAIT ]]; do
             # Get VM state
             VM_STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
 
-            # Get IP from DHCP leases
+            # Get IP for this VM from the list
             VM_IP=""
-            for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
-                VM_IP="$lease"
-                break
+            for ip in "${VM_IPS[@]}"; do
+                VM_MAC=$(virsh -c "$LIBVIRT_URI" domifaddr "$ACTUAL_VM" 2>/dev/null | grep -v "^-" | awk '{print $2}' | head -1)
+                if [[ -n "$VM_MAC" ]]; then
+                    LEASE_MAC=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep "$ip" | awk '{print $2}')
+                    if [[ "$VM_MAC" == "$LEASE_MAC" ]]; then
+                        VM_IP="$ip"
+                        break
+                    fi
+                fi
             done
 
             if [[ -n "$VM_IP" ]]; then
