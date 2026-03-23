@@ -17,19 +17,16 @@ source "$PROJECT_ROOT/.env"
 set +a
 
 # Parse arguments
-CLEAN_VOLUMES=false
 DESTROY_NETWORK=false
 FULL_CLEANUP=false
 
-while getopts "vnf" opt; do
+while getopts "nf" opt; do
     case $opt in
-        v) CLEAN_VOLUMES=true ;;
         n) DESTROY_NETWORK=true ;;
         f) FULL_CLEANUP=true ;;
-        *) echo "Usage: $0 [-v] [-n] [-f]"
-           echo "  -v  Clean volumes (stop VMs + remove disk images)"
+        *) echo "Usage: $0 [-n] [-f]"
            echo "  -n  Destroy network (stop VMs + remove network)"
-           echo "  -f  Full cleanup (everything: VMs, volumes, network)"
+           echo "  -f  Full cleanup (VMs, volumes, network, storage pool)"
            exit 1 ;;
     esac
 done
@@ -139,35 +136,34 @@ echo "  ✓ All VMs stopped"
 echo ""
 
 # =============================================================================
-# Step 4: Clean up volumes (if -v or -f)
+# Step 4: Clean up volumes and storage pool
 # =============================================================================
-if [[ "$CLEAN_VOLUMES" == "true" ]]; then
-    echo "[4/7] Cleaning up storage volumes..."
+echo "[4/7] Cleaning up storage volumes..."
 
-    STORAGE_POOL="${STORAGE_POOL:-default}"
-    ISO_VOLUME_NAME="talos-metal-amd64.iso"
+STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
 
-    # Remove ISO volume from storage pool
-    if virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$ISO_VOLUME_NAME" &>/dev/null; then
-        echo "  Removing ISO volume: $ISO_VOLUME_NAME"
-        virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$ISO_VOLUME_NAME"
-        echo "  ✓ ISO volume removed"
-    else
-        echo "  ISO volume not found in storage pool"
+# Remove ALL volumes from talos-pool (ISO and VM disks)
+echo "  Removing all volumes from $STORAGE_POOL..."
+for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | awk '{print $1}'); do
+    [[ -z "$vol" ]] && continue
+    echo "    Removing: $vol"
+    virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null && \
+        echo "      ✓ Removed" || echo "      ✗ Failed"
+done
+
+echo "  ✓ Volumes cleaned"
+
+# If full cleanup, also remove the storage pool itself
+if [[ "$FULL_CLEANUP" == "true" ]]; then
+    echo "  Removing storage pool: $STORAGE_POOL..."
+    if virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
+        virsh -c "$LIBVIRT_URI" pool-destroy "$STORAGE_POOL" 2>/dev/null || true
+        virsh -c "$LIBVIRT_URI" pool-undefine "$STORAGE_POOL" 2>/dev/null || true
+        echo "    ✓ Storage pool removed"
     fi
-
-    # Remove any VM disk volumes
-    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-        # Check for disk volumes with VM name pattern
-        for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | awk -v name="$vm_name" '$1 ~ name {print $1}'); do
-            echo "  Removing volume: $vol"
-            virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null || true
-        done
-    done
-    echo "  ✓ Volumes cleaned"
-else
-    echo "[4/7] Skipping volume cleanup (use -v for full volume cleanup)"
 fi
+
+echo "  ✓ Storage cleanup complete"
 echo ""
 
 # =============================================================================
@@ -212,15 +208,16 @@ echo ""
 echo "[7/7] Cleanup Summary"
 echo "==================="
 echo "VMs: Stopped and undefined"
-if [[ "$CLEAN_VOLUMES" == "true" ]]; then
-    echo "Volumes: Cleaned"
-else
-    echo "Volumes: Preserved"
-fi
+echo "Volumes: Cleaned"
 if [[ "$DESTROY_NETWORK" == "true" ]]; then
     echo "Network: Destroyed"
 else
     echo "Network: Preserved"
+fi
+if [[ "$FULL_CLEANUP" == "true" ]]; then
+    echo "Storage Pool: Removed"
+else
+    echo "Storage Pool: Preserved"
 fi
 echo ""
 echo "To restart the cluster:"
