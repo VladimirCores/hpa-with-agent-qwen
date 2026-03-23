@@ -133,9 +133,33 @@ fi
 echo ""
 
 # =============================================================================
-# Step 2: Generate machine configurations
+# Step 2: Generate secrets bundle
 # =============================================================================
-echo "[2/7] Generating machine configurations..."
+echo "[2/8] Generating secrets bundle..."
+
+mkdir -p "$CONFIG_DIR"
+
+# Generate secrets bundle (reusable across cluster deployments)
+SECRETS_FILE="$CONFIG_DIR/secrets.yaml"
+if [[ -f "$SECRETS_FILE" ]]; then
+    echo "  Secrets bundle already exists: $SECRETS_FILE"
+    echo "  ✓ Using existing secrets"
+else
+    echo "  Generating new secrets bundle..."
+    talosctl gen secrets --output-file "$SECRETS_FILE"
+    if [[ -f "$SECRETS_FILE" ]]; then
+        echo "  ✓ Secrets bundle generated"
+    else
+        echo "  ERROR: Failed to generate secrets bundle"
+        exit 1
+    fi
+fi
+echo ""
+
+# =============================================================================
+# Step 3: Generate machine configurations
+# =============================================================================
+echo "[3/8] Generating machine configurations..."
 
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$CERTS_DIR"
@@ -144,14 +168,15 @@ mkdir -p "$CERTS_DIR"
 rm -f "$CONFIG_DIR"/*.yaml "$CONFIG_DIR"/talosconfig "$CONFIG_DIR"/kubeconfig
 rm -f "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key
 
-# Generate configurations
+# Generate configurations with secrets bundle
 echo "  Generating configs for cluster: $CLUSTER_NAME"
 echo "  Endpoint: https://$MASTER_IP:6443"
 
 # Use system installer (matches running Talos version)
-# Generate with correct endpoint from the start
+# Generate with correct endpoint from the start, using secrets bundle
 talosctl gen config "$CLUSTER_NAME" "https://$MASTER_IP:6443" \
-    --output-dir "$CONFIG_DIR"
+    --output-dir "$CONFIG_DIR" \
+    --with-secrets "$SECRETS_FILE"
 
 if [[ -f "$CONFIG_DIR/controlplane.yaml" ]] && [[ -f "$CONFIG_DIR/worker.yaml" ]]; then
     echo "  ✓ Configurations generated"
@@ -231,9 +256,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3: Wait for nodes to be ready
+# Step 4: Wait for nodes to be ready
 # =============================================================================
-echo "[3/7] Waiting for nodes to be ready..."
+echo "[4/8] Waiting for nodes to be ready..."
 
 # Wait for master (use --insecure for pre-bootstrap connection)
 echo "  Waiting for master ($MASTER_IP)..."
@@ -269,9 +294,9 @@ done
 echo ""
 
 # =============================================================================
-# Step 4: Bootstrap FIRST, then apply config
+# Step 5: Bootstrap FIRST, then apply config
 # =============================================================================
-echo "[4/7] Bootstrapping cluster (before apply-config)..."
+echo "[5/8] Bootstrapping cluster (before apply-config)..."
 
 # CRITICAL: Bootstrap MUST happen BEFORE apply-config
 # For Talos v1.12.x: node must be in maintenance mode (empty disk)
@@ -337,9 +362,9 @@ done
 echo ""
 
 # =============================================================================
-# Step 5: Wait for nodes to reboot and verify
+# Step 6: Wait for nodes to reboot and verify
 # =============================================================================
-echo "[5/7] Waiting for master to reboot..."
+echo "[6/8] Waiting for master to reboot..."
 
 MAX_WAIT=120
 WAITED=0
@@ -373,9 +398,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 6: Configure kubectl access
+# Step 7: Configure kubectl access
 # =============================================================================
-echo "[6/7] Configuring kubectl access..."
+echo "[7/8] Configuring kubectl access..."
 
 if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then
     # Wait for Kubernetes API server to be ready
@@ -411,9 +436,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 7: Verify cluster
+# Step 8: Verify cluster
 # =============================================================================
-echo "[7/7] Verifying cluster..."
+echo "[8/8] Verifying cluster..."
 
 # Check Kubernetes nodes
 if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then

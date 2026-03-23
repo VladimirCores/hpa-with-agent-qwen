@@ -24,9 +24,22 @@ After VMs are running, this step covers:
 > # 2. Start VMs (disks are empty, boots to maintenance mode)
 > ./scripts/vms-startup.sh
 >
-> # 3. Bootstrap (works because node is in maintenance mode)
+> # 3. Bootstrap (generates secrets, configs, applies config)
 > ./scripts/talos-bootstrap.sh
 > ```
+>
+> **Bootstrap script steps**:
+>
+> 1. Check prerequisites (talosctl, kubectl, VMs)
+> 2. **Generate secrets bundle** (`talosctl gen secrets`)
+> 3. Generate machine configs (using secrets bundle)
+> 4. Wait for nodes (all VMs accessible)
+> 5. Bootstrap cluster (before apply-config)
+> 6. Apply configs (master + workers)
+> 7. Wait for reboot
+> 8. Verify cluster
+> 9. Configure kubectl
+> 10. Set boot order to disk
 >
 > **Verify maintenance mode**:
 >
