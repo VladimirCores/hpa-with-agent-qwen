@@ -187,6 +187,18 @@ mapfile -t IPS < <(libvirt_get_dhcp_ips -n my-network -p all)
 libvirt_get_dhcp_ips --help
 ```
 
+**Running steps independently**:
+
+Steps can be run independently for testing or debugging:
+
+```bash
+# Run a specific step (helper functions auto-loaded)
+NETWORK_NAME=cluster-talos-net bash scripts/vms-startup/08-wait-for-talos.sh
+
+# Run step 10 (reboot verification)
+NETWORK_NAME=cluster-talos-net bash scripts/vms-startup/10-reboot-verify.sh
+```
+
 ### vms-cleanup.sh
 
 The cleanup script performs full cleanup by default:
