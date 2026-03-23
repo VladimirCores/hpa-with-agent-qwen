@@ -257,7 +257,7 @@ echo ""
 # =============================================================================
 # Step 8: Wait for Talos to boot from ISO
 # =============================================================================
-echo "[8/10] Waiting for Talos to boot from ISO..."
+echo "[8/11] Waiting for Talos to boot from ISO..."
 
 # Wait for each VM to be accessible via Talos API
 BOOT_WAIT=300  # 5 minutes max
@@ -265,12 +265,26 @@ BOOT_INTERVAL=5
 BOOT_ELAPSED=0
 
 echo "  Waiting for Talos API to be accessible..."
+echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
+echo ""
+
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
+    echo "  [${BOOT_ELAPSED}s] Checking VM status..."
+
     ALL_READY=true
+    READY_COUNT=0
+    TOTAL_COUNT=0
+
     for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+        TOTAL_COUNT=$((TOTAL_COUNT + 1))
+
         # Find VM with matching suffix
         ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
+
         if [[ -n "$ACTUAL_VM" ]]; then
+            # Get VM state
+            VM_STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
+
             # Get IP from DHCP leases
             VM_IP=""
             for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
@@ -280,27 +294,40 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
 
             if [[ -n "$VM_IP" ]]; then
                 if talosctl get version --nodes "$VM_IP" --insecure &>/dev/null; then
-                    echo "    ✓ $ACTUAL_VM ($VM_IP) - Talos ready"
+                    echo "    ✓ $ACTUAL_VM ($VM_IP) - Talos API ready"
+                    READY_COUNT=$((READY_COUNT + 1))
                     continue
+                else
+                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - IP assigned, Talos API not ready (state: $VM_STATE)"
                 fi
+            else
+                echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
             fi
+        else
+            echo "    ✗ $vm_name - VM not found"
         fi
         ALL_READY=false
     done
 
+    echo ""
+    echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
+    echo ""
+
     if [[ "$ALL_READY" == "true" ]]; then
+        echo "  All VMs ready!"
         break
     fi
 
     sleep $BOOT_INTERVAL
     BOOT_ELAPSED=$((BOOT_ELAPSED + BOOT_INTERVAL))
-    echo "    ... waiting (${BOOT_ELAPSED}s/${BOOT_WAIT}s)"
 done
 
 if [[ "$ALL_READY" != "true" ]]; then
     echo "  WARNING: Not all VMs ready after ${BOOT_WAIT}s"
+    echo "  Check VM console logs: virsh -c qemu:///system console <vm-name>"
 fi
 
+echo ""
 echo "  ✓ Talos booted from ISO"
 echo ""
 
@@ -340,13 +367,14 @@ echo ""
 # =============================================================================
 # Step 10: Reboot VMs and verify disk boot
 # =============================================================================
-echo "[10/10] Rebooting VMs to verify disk boot..."
+echo "[10/11] Rebooting VMs to verify disk boot..."
 
 REBOOT_WAIT=300  # 5 minutes max
 REBOOT_INTERVAL=5
 REBOOT_ELAPSED=0
 
 # Reboot all VMs
+echo "  Sending reboot command to all VMs..."
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
     ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
     if [[ -n "$ACTUAL_VM" ]]; then
@@ -357,12 +385,25 @@ done
 
 echo ""
 echo "  Waiting for VMs to reboot from disk..."
+echo "  (Polling every ${REBOOT_INTERVAL}s, timeout ${REBOOT_WAIT}s)"
+echo ""
 
 while [[ $REBOOT_ELAPSED -lt $REBOOT_WAIT ]]; do
+    echo "  [${REBOOT_ELAPSED}s] Checking VM status after reboot..."
+
     ALL_READY=true
+    READY_COUNT=0
+    TOTAL_COUNT=0
+
     for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+        TOTAL_COUNT=$((TOTAL_COUNT + 1))
+
         ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
+
         if [[ -n "$ACTUAL_VM" ]]; then
+            # Get VM state
+            VM_STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
+
             # Get IP from DHCP leases
             VM_IP=""
             for lease in $(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -i "$vm_name" | awk '{print $4}' | cut -d'/' -f1); do
@@ -373,30 +414,42 @@ while [[ $REBOOT_ELAPSED -lt $REBOOT_WAIT ]]; do
             if [[ -n "$VM_IP" ]]; then
                 if talosctl get version --nodes "$VM_IP" --insecure &>/dev/null; then
                     # Verify boot source (should be disk, not ISO)
-                    BOOT_SOURCE=$(virsh -c "$LIBVIRT_URI" domblklist "$ACTUAL_VM" 2>/dev/null | grep -E "^hda|^sda" | wc -l)
-                    if [[ "$BOOT_SOURCE" -eq 0 ]]; then
-                        echo "    ✓ $ACTUAL_VM ($VM_IP) - Booted from disk"
+                    CDROM_PRESENT=$(virsh -c "$LIBVIRT_URI" domblklist "$ACTUAL_VM" 2>/dev/null | grep -E "^hda.*iso$" | wc -l)
+                    if [[ "$CDROM_PRESENT" -eq 0 ]]; then
+                        echo "    ✓ $ACTUAL_VM ($VM_IP) - Booted from disk ✓"
                     else
-                        echo "    ✓ $ACTUAL_VM ($VM_IP) - Ready"
+                        echo "    ⚠ $ACTUAL_VM ($VM_IP) - Ready (CDROM still attached)"
                     fi
+                    READY_COUNT=$((READY_COUNT + 1))
                     continue
+                else
+                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - IP assigned, Talos API not ready (state: $VM_STATE)"
                 fi
+            else
+                echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
             fi
+        else
+            echo "    ✗ $vm_name - VM not found"
         fi
         ALL_READY=false
     done
 
+    echo ""
+    echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
+    echo ""
+
     if [[ "$ALL_READY" == "true" ]]; then
+        echo "  All VMs booted from disk successfully!"
         break
     fi
 
     sleep $REBOOT_INTERVAL
     REBOOT_ELAPSED=$((REBOOT_ELAPSED + REBOOT_INTERVAL))
-    echo "    ... waiting (${REBOOT_ELAPSED}s/${REBOOT_WAIT}s)"
 done
 
 if [[ "$ALL_READY" != "true" ]]; then
     echo "  WARNING: Not all VMs ready after reboot"
+    echo "  Check VM console logs: virsh -c qemu:///system console <vm-name>"
 else
     echo "  ✓ All VMs booted from disk successfully"
 fi
