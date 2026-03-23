@@ -147,42 +147,50 @@ The startup script calls each step as a **function** with explicit parameters fr
 **Execution flow**:
 
 ```
-Steps 01-07: Run synchronously (sequential)
+Step 01: Synchronous (wait for completion)
      ↓
-Step 08: Runs sync (default) or async (with -a flag)
-     ↓ (ALWAYS waits for completion)
-Steps 09-11: Run synchronously (sequential)
+Step 02: Synchronous (wait for completion)
+     ↓
+Step 03: Synchronous (wait for completion)
+     ↓
+Step 04: Synchronous (wait for completion)
+     ↓
+Step 05: Synchronous (wait for completion)
+     ↓
+Step 06: Synchronous (wait for completion)
+     ↓
+Step 07: Synchronous (wait for completion)
+     ↓
+Step 08: Synchronous (wait for completion)
+     ↓
+Step 09: Synchronous (wait for completion)
+     ↓
+Step 10: Synchronous (wait for completion)
+     ↓
+Step 11: Synchronous (wait for completion)
 ```
 
-**Important**: Step 08 **always** completes before steps 09-11 run, even with `-a` flag.
+**Important**: Each step completes fully before the next step begins.
 
 **Usage**:
 
 ```bash
-# Dry run (show plan without executing)
+# Run all steps (default)
 ./scripts/vms-startup.sh
 
-# Execute steps synchronously
-./scripts/vms-startup.sh -e
-
-# Execute with async step 08
-./scripts/vms-startup.sh -e -a
-
 # Skip cleanup
-./scripts/vms-startup.sh -e -s
+./scripts/vms-startup.sh -s
 
 # Force reset (destroy disks)
-./scripts/vms-startup.sh -e -f
+./scripts/vms-startup.sh -f
 ```
 
 **Flags**:
 
-| Flag | Description                        | Default |
-| ---- | ---------------------------------- | ------- |
-| `-e` | Execute steps (dry run if omitted) | false   |
-| `-a` | Run step 08 asynchronously         | false   |
-| `-s` | Skip cleanup                       | false   |
-| `-f` | Force reset (destroy disks)        | false   |
+| Flag | Description                 | Default |
+| ---- | --------------------------- | ------- |
+| `-s` | Skip cleanup                | false   |
+| `-f` | Force reset (destroy disks) | false   |
 
 **Benefits of function-based approach**:
 
@@ -190,7 +198,7 @@ Steps 09-11: Run synchronously (sequential)
 - Explicit parameter passing
 - Easy to test individual steps
 - No shared state between steps
-- Dry run mode for planning
+- Simple, linear execution flow
   **Helper function usage**:
 
 ```bash
