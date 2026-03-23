@@ -175,10 +175,11 @@ Step 11: Async + Wait → completes
 
 **Flags**:
 
-| Flag | Description                 | Default |
-| ---- | --------------------------- | ------- |
-| `-s` | Skip cleanup                | false   |
-| `-f` | Force reset (destroy disks) | false   |
+| Flag | Description                       | Default |
+| ---- | --------------------------------- | ------- |
+| `-s` | Skip cleanup                      | false   |
+| `-f` | Force reset (destroy disks)       | false   |
+| `-v` | Verbose output (detailed logging) | false   |
 
 **Benefits of function-based approach**:
 

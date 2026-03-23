@@ -36,8 +36,8 @@ echo ""
 
 # Initial network check
 if [[ "$VERBOSE" == "true" ]]; then
-    echo "  [VERBOSE] Getting DHCP leases for network: $NETWORK_NAME"
-    virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null || echo "  [VERBOSE] No leases found"
+    echo "  > Getting DHCP leases for network: $NETWORK_NAME"
+    virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null || echo "  > No leases found"
     echo ""
 fi
 
@@ -50,27 +50,27 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
 
     # Get all IPs from libvirt network
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "  [VERBOSE] Querying DHCP leases..."
+        echo "  > Querying DHCP leases..."
     fi
     mapfile -t VM_IPS < <(libvirt_get_dhcp_ips -n "$NETWORK_NAME" -p ipv4 -r)
     TOTAL_COUNT=${#VM_IPS[@]}
 
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "  [VERBOSE] Found ${TOTAL_COUNT} IPs: ${VM_IPS[*]}"
+        echo "  > Found ${TOTAL_COUNT} IPs: ${VM_IPS[*]}"
     fi
 
     # Check each IP directly
     for vm_ip in "${VM_IPS[@]}"; do
         if [[ -n "$vm_ip" ]]; then
             if [[ "$VERBOSE" == "true" ]]; then
-                echo "  [VERBOSE] Checking machine status for IP: $vm_ip"
+                echo "  > Checking machine status for IP: $vm_ip"
             fi
 
             # Check machine READY status
             MACHINE_READY=$(check_machine_ready "$vm_ip")
 
             if [[ "$VERBOSE" == "true" ]]; then
-                echo "  [VERBOSE] Machine READY status for $vm_ip: $MACHINE_READY"
+                echo "  > Machine READY status for $vm_ip: $MACHINE_READY"
             fi
 
             if [[ "$MACHINE_READY" == "true" ]]; then
@@ -86,7 +86,7 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
             fi
         else
             if [[ "$VERBOSE" == "true" ]]; then
-                echo "  [VERBOSE] Skipping empty IP"
+                echo "  > Skipping empty IP"
             fi
         fi
     done
