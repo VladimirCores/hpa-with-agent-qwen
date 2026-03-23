@@ -18,15 +18,13 @@ set +a
 
 # Parse arguments
 DESTROY_NETWORK=false
-FULL_CLEANUP=false
+FULL_CLEANUP=true  # Full cleanup is now default
 
-while getopts "nf" opt; do
+while getopts "n" opt; do
     case $opt in
         n) DESTROY_NETWORK=true ;;
-        f) FULL_CLEANUP=true ;;
-        *) echo "Usage: $0 [-n] [-f]"
-           echo "  -n  Destroy network (stop VMs + remove network)"
-           echo "  -f  Full cleanup (VMs, volumes, network, storage pool)"
+        *) echo "Usage: $0 [-n]"
+           echo "  -n  Destroy network (default: preserve network)"
            exit 1 ;;
     esac
 done
@@ -214,16 +212,11 @@ if [[ "$DESTROY_NETWORK" == "true" ]]; then
 else
     echo "Network: Preserved"
 fi
-if [[ "$FULL_CLEANUP" == "true" ]]; then
-    echo "Storage Pool: Removed"
-else
-    echo "Storage Pool: Preserved"
-fi
+echo "Storage Pool: Removed"
 echo ""
 echo "To restart the cluster:"
 echo "  ./scripts/vms-startup.sh"
 echo ""
-echo "Note: After cleanup, VMs will boot from ISO (CDROM) on next start."
-echo "      Run ./scripts/talos-bootstrap.sh to change boot order to disk."
+echo "Note: Storage pool was removed. It will be recreated on next startup."
 echo ""
 echo "=== Cleanup Complete ==="
