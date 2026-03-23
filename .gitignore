@@ -9,3 +9,6 @@ iso/
 # Ignore environment file
 .env
 talos-cluster/
+
+# Ignore sudo cache files
+.sudo_cache*
