@@ -26,14 +26,17 @@ fi
 # Parse arguments
 SKIP_CLEANUP=false
 FORCE_RESET=false
+VERBOSE=false
 
-while getopts "sf" opt; do
+while getopts "sfv" opt; do
     case $opt in
         s) SKIP_CLEANUP=true ;;
         f) FORCE_RESET=true ;;
-        *) echo "Usage: $0 [-s] [-f]"
+        v) VERBOSE=true ;;
+        *) echo "Usage: $0 [-s] [-f] [-v]"
            echo "  -s  Skip cleanup (start without stopping existing VMs)"
            echo "  -f  Force reset (destroy VMs and disks, fresh start)"
+           echo "  -v  Verbose output (detailed logging)"
            exit 1 ;;
     esac
 done
@@ -46,6 +49,7 @@ echo "  MASTER_NAME: $MASTER_NAME ($MASTER_IP)"
 echo "  WORKER_COUNT: $WORKER_COUNT"
 echo "  SKIP_CLEANUP: $SKIP_CLEANUP"
 echo "  FORCE_RESET: $FORCE_RESET"
+echo "  VERBOSE: $VERBOSE"
 echo ""
 
 # Source helper functions
@@ -112,6 +116,7 @@ step_08_wait_for_talos() {
     WORKER_COUNT="$WORKER_COUNT" \
     WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
     LIBVIRT_URI="$LIBVIRT_URI" \
+    VERBOSE="$VERBOSE" \
     bash "$STEPS_DIR/08-wait-for-talos.sh"
 }
 
