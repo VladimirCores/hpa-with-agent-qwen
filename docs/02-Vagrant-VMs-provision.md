@@ -140,10 +140,20 @@ The startup script executes the following modular steps:
 | 05   | `05-setup-network.sh`       | Run `prepare-network.sh`                                |
 | 06   | `06-cleanup-vms.sh`         | Remove old VM disks (unless `-s` flag)                  |
 | 07   | `07-start-vms.sh`           | Start VMs via Vagrant                                   |
-| 08   | `08-wait-for-talos.sh`      | Wait for Talos READY (polls IPs directly)               |
+| 08   | `08-wait-for-talos.sh`      | Wait for Talos READY (runs async)                       |
 | 09   | `09-eject-iso.sh`           | Eject ISO from all VMs, set disk boot                   |
 | 10   | `10-reboot-verify.sh`       | Reboot VMs, verify disk boot (polls IPs)                |
 | 11   | `11-summary.sh`             | Display summary and next steps                          |
+
+**Execution flow**:
+
+```
+Steps 01-07: Run synchronously (sequential)
+     ↓
+Step 08: Runs asynchronously (background)
+     ↓ (wait for completion)
+Steps 09-11: Run synchronously (sequential)
+```
 
 **Total time**: ~5-10 minutes (includes Talos boot time + reboot verification)
 
