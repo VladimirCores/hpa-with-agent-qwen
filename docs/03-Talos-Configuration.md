@@ -11,29 +11,30 @@ After VMs are running, this step covers:
 3. **Install Kubernetes Components** - CNI, metrics-server, and essential addons
 4. **Verify Cluster** - Ensure everything is working correctly
 
-> **⚠️ Talos v1.12.x Bootstrap Issue**
+> **ℹ️ Talos v1.12.x Notes**
 >
-> Talos v1.12.x ISO boots directly into cluster mode instead of maintenance mode, preventing bootstrap with error:
+> Talos v1.12.x requires **empty disks** to boot into maintenance mode for bootstrap.
 >
-> ```
-> rpc error: code = PermissionDenied desc = not authorized
-> ```
->
-> **Workaround**: Use Talos v1.11.5 which boots into maintenance mode correctly:
+> **Workflow**:
 >
 > ```bash
-> # 1. Update .env to use v1.11.5
-> sed -i 's|TALOS_IMAGE_URL=.*|TALOS_IMAGE_URL=https://github.com/siderolabs/talos/releases/download/v1.11.5/metal-amd64.iso|' .env
->
-> # 2. Full cleanup (removes disk state)
+> # 1. Full cleanup (wipes all disks)
 > ./scripts/vms-cleanup.sh
 >
-> # 3. Start fresh and bootstrap
+> # 2. Start VMs (disks are empty, boots to maintenance mode)
 > ./scripts/vms-startup.sh
+>
+> # 3. Bootstrap (works because node is in maintenance mode)
 > ./scripts/talos-bootstrap.sh
 > ```
 >
-> **Track the issue**: https://github.com/siderolabs/talos/issues
+> **Verify maintenance mode**:
+>
+> ```bash
+> talosctl get machineconfig --nodes 10.0.0.10 --insecure
+> # Empty output or success = maintenance mode ✓
+> # PermissionDenied = cluster mode (run cleanup)
+> ```
 
 ### Architecture
 

@@ -274,23 +274,27 @@ echo ""
 echo "[4/7] Bootstrapping cluster (before apply-config)..."
 
 # CRITICAL: Bootstrap MUST happen BEFORE apply-config
-# After apply-config, node reboots with new certs and we can't authenticate
-# Bootstrap while node is still in maintenance mode
+# For Talos v1.12.x: node must be in maintenance mode (empty disk)
 
 echo "  Bootstrapping cluster..."
 
-# Check if node is in maintenance mode by trying to get machineconfig
-if talosctl get machineconfig --nodes "$MASTER_IP" --insecure 2>&1 | grep -q "PermissionDenied"; then
-    echo "  Node is NOT in maintenance mode (has existing state)"
+# Check if node is in maintenance mode
+# In maintenance mode: get machineconfig returns empty or works without auth
+# In cluster mode: get machineconfig returns "PermissionDenied"
+MACHINECONFIG_OUTPUT=$(talosctl get machineconfig --nodes "$MASTER_IP" --insecure 2>&1)
+
+if echo "$MACHINECONFIG_OUTPUT" | grep -q "PermissionDenied"; then
+    echo "  ERROR: Node is NOT in maintenance mode"
     echo ""
-    echo "  ERROR: Node has existing Talos state on disk"
+    echo "  Talos v1.12.x requires EMPTY disk to boot into maintenance mode."
+    echo "  The disk has existing Talos state."
     echo ""
-    echo "  Solution: Run full cleanup to wipe disk state"
+    echo "  Solution: Run full cleanup to wipe disks"
     echo "    ./scripts/vms-cleanup.sh"
     echo "    ./scripts/vms-startup.sh"
     echo "    ./scripts/talos-bootstrap.sh"
     echo ""
-    echo "  Or manually wipe the disk:"
+    echo "  Or manually wipe disks:"
     echo "    virsh -c qemu:///system vol-delete --pool talos-pool with-agent-qwen_talos-master-vda.qcow2"
     echo "    virsh -c qemu:///system vol-delete --pool talos-pool with-agent-qwen_talos-worker-1-vda.qcow2"
     echo "    virsh -c qemu:///system vol-delete --pool talos-pool with-agent-qwen_talos-worker-2-vda.qcow2"
@@ -299,17 +303,18 @@ if talosctl get machineconfig --nodes "$MASTER_IP" --insecure 2>&1 | grep -q "Pe
 fi
 
 # For Talos v1.12.x, bootstrap requires talosconfig with correct certs
-# Try bootstrap with generated talosconfig
 echo "  Attempting bootstrap..."
 if talosctl bootstrap --nodes "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null; then
     echo "  ✓ Kubernetes bootstrapped"
 else
     echo "  ERROR: Bootstrap failed"
     echo ""
-    echo "  Talos 1.12.x bootstrap troubleshooting:"
-    echo "  1. Ensure VMs are booted from ISO (maintenance mode)"
+    echo "  Talos v1.12.x bootstrap troubleshooting:"
+    echo "  1. Ensure VMs are booted from ISO with EMPTY disks"
     echo "  2. Check Talos is accessible: talosctl get version --nodes $MASTER_IP --insecure"
     echo "  3. Check maintenance mode: talosctl get machineconfig --nodes $MASTER_IP --insecure"
+    echo "     - Empty output or success = maintenance mode ✓"
+    echo "     - PermissionDenied = cluster mode (wipe disks)"
     echo "  4. Try manual bootstrap: talosctl bootstrap --nodes $MASTER_IP --talosconfig $CONFIG_DIR/talosconfig"
     echo ""
     exit 1
