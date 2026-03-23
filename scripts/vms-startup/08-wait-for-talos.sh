@@ -1,6 +1,13 @@
 #!/bin/bash
 # Step 08: Wait for Talos to boot from ISO
 # Polls VMs until Talos API is accessible (READY=true)
+#
+# Usage:
+#   Sync:  bash 08-wait-for-talos.sh
+#   Async: bash 08-wait-for-talos.sh &  # Runs in background
+#
+# When run async, creates completion file: /tmp/talos-boot-complete-<PID>
+# File contains: SUCCESS or WARNING
 
 # Ensure helper functions are loaded
 if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
@@ -8,13 +15,21 @@ if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
     source "$SCRIPT_DIR/00-helper-functions.sh"
 fi
 
-echo "[8/11] Waiting for Talos to boot from ISO..."
-
-# Wait for each VM to be accessible via Talos API
+# Configuration
 BOOT_WAIT=300  # 5 minutes max
 BOOT_INTERVAL=5
 BOOT_ELAPSED=0
+COMPLETE_FILE="/tmp/talos-boot-complete-$$"
 
+# Cleanup on exit
+cleanup() {
+    rm -f "$COMPLETE_FILE" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "[8/11] Waiting for Talos to boot from ISO..."
+
+# Wait for each VM to be accessible via Talos API
 echo "  Waiting for Talos API to be accessible..."
 echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
@@ -49,13 +64,18 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
         fi
     done
 
-    echo ""
-    echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
-    echo ""
-
     if [[ "$ALL_READY" == "true" ]]; then
+        echo ""
+        echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
+        echo ""
         echo "  All VMs ready!"
+        # Signal completion
+        echo "SUCCESS" > "$COMPLETE_FILE"
         break
+    else
+        echo ""
+        echo "  Progress: ${READY_COUNT}/${TOTAL_COUNT} VMs ready"
+        echo ""
     fi
 
     sleep $BOOT_INTERVAL
@@ -67,6 +87,8 @@ if [[ "$ALL_READY" != "true" ]]; then
     echo "  Check VM console logs: virsh -c qemu:///system console <vm-name>"
     echo ""
     echo "  Continuing anyway (VMs may need more time)..."
+    # Signal completion with warning
+    echo "WARNING" > "$COMPLETE_FILE"
 fi
 
 echo ""

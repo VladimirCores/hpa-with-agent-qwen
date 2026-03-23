@@ -37,9 +37,33 @@ echo ""
 # Source helper functions
 source "$STEPS_DIR/00-helper-functions.sh"
 
-# Execute steps
-for step_file in "$STEPS_DIR"/[0-9][0-9]-*.sh; do
+# Execute steps 01-07 synchronously
+for step_file in "$STEPS_DIR"/0[1-7]-*.sh; do
     if [[ -f "$step_file" ]]; then
         source "$step_file"
+    fi
+done
+
+# Step 08: Run asynchronously (waiting for Talos boot)
+echo "Starting step 08 (wait for Talos boot) in background..."
+bash "$STEPS_DIR/08-wait-for-talos.sh" &
+STEP08_PID=$!
+
+# Wait for step 08 to complete
+echo "Waiting for Talos boot to complete (PID: $STEP08_PID)..."
+wait $STEP08_PID
+STEP08_EXIT=$?
+
+if [[ $STEP08_EXIT -ne 0 ]]; then
+    echo "WARNING: Step 08 completed with exit code $STEP08_EXIT"
+fi
+
+# Continue with steps 09-11 synchronously
+for step_file in "$STEPS_DIR"/[0-9][0-9]-*.sh; do
+    if [[ -f "$step_file" ]]; then
+        step_num=$(basename "$step_file" | cut -d'-' -f1)
+        if [[ "$step_num" -gt 8 ]]; then
+            source "$step_file"
+        fi
     fi
 done
