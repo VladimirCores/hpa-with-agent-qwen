@@ -21,7 +21,7 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
     TOTAL_COUNT=0
 
     # Get all IPs from libvirt network
-    mapfile -t VM_IPS < <(get_libvirt_ips "$NETWORK_NAME" "ipv4")
+    mapfile -t VM_IPS < <(libvirt_get_dhcp_ips -n "$NETWORK_NAME" -p ipv4 -r)
     TOTAL_COUNT=${#VM_IPS[@]}
 
     # Check each IP directly
