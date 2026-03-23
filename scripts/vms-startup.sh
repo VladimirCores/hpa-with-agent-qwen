@@ -271,10 +271,10 @@ echo ""
 # Function to check if Talos machine is ready
 check_machine_ready() {
     local ip="$1"
-    # Get machine status and check for READY state
-    local status
-    status=$(timeout 3 talosctl -n "$ip" get machinestatus --insecure 2>/dev/null | grep "READY" | awk '{print $2}' || echo "")
-    if [[ "$status" == "true" ]]; then
+    # Get machine status in YAML format and extract READY value
+    local ready
+    ready=$(timeout 3 talosctl -n "$ip" get machinestatus --insecure -o yaml 2>/dev/null | grep -i "ready:" | awk '{print $2}' | head -1 || echo "")
+    if [[ "$ready" == "true" ]]; then
         echo "true"
     else
         echo "false"
