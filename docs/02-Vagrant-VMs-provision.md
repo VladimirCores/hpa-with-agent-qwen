@@ -125,23 +125,24 @@ vagrant ssh talos-master
 ```
 
 ## Scripts Details
+
 ### vms-startup.sh
 
 The startup script calls each step as a **function** with explicit parameters from `.env`.
 
-| Step | Function | Description |
-|------|----------|-------------|
-| 01   | `step_01_authenticate_sudo` | Sudo authentication (cached for 15 min) |
-| 02   | `step_02_check_prerequisites` | Verify Vagrantfile, vagrant-libvirt, libvirtd |
-| 03   | `step_03_prepare_iso` | Download/verify Talos ISO |
-| 04   | `step_04_copy_iso_to_pool` | Copy ISO to storage pool |
-| 05   | `step_05_setup_network` | Run `prepare-network.sh` |
-| 06   | `step_06_cleanup_vms` | Remove old VM disks (unless `-s` flag) |
-| 07   | `step_07_start_vms` | Start VMs via Vagrant |
-| 08   | `step_08_wait_for_talos` | Wait for Talos READY (can run async with `-a`) |
-| 09   | `step_09_eject_iso` | Eject ISO from all VMs, set disk boot |
-| 10   | `step_10_reboot_verify` | Reboot VMs, verify disk boot |
-| 11   | `step_11_summary` | Display summary and next steps |
+| Step | Function                      | Description                                    |
+| ---- | ----------------------------- | ---------------------------------------------- |
+| 01   | `step_01_authenticate_sudo`   | Sudo authentication (cached for 15 min)        |
+| 02   | `step_02_check_prerequisites` | Verify Vagrantfile, vagrant-libvirt, libvirtd  |
+| 03   | `step_03_prepare_iso`         | Download/verify Talos ISO                      |
+| 04   | `step_04_copy_iso_to_pool`    | Copy ISO to storage pool                       |
+| 05   | `step_05_setup_network`       | Run `prepare-network.sh`                       |
+| 06   | `step_06_cleanup_vms`         | Remove old VM disks (unless `-s` flag)         |
+| 07   | `step_07_start_vms`           | Start VMs via Vagrant                          |
+| 08   | `step_08_wait_for_talos`      | Wait for Talos READY (can run async with `-a`) |
+| 09   | `step_09_eject_iso`           | Eject ISO from all VMs, set disk boot          |
+| 10   | `step_10_reboot_verify`       | Reboot VMs, verify disk boot                   |
+| 11   | `step_11_summary`             | Display summary and next steps                 |
 
 **Execution flow**:
 
@@ -149,9 +150,11 @@ The startup script calls each step as a **function** with explicit parameters fr
 Steps 01-07: Run synchronously (sequential)
      ↓
 Step 08: Runs sync (default) or async (with -a flag)
-     ↓ (wait if async)
+     ↓ (ALWAYS waits for completion)
 Steps 09-11: Run synchronously (sequential)
 ```
+
+**Important**: Step 08 **always** completes before steps 09-11 run, even with `-a` flag.
 
 **Usage**:
 
@@ -174,20 +177,21 @@ Steps 09-11: Run synchronously (sequential)
 
 **Flags**:
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-e` | Execute steps (dry run if omitted) | false |
-| `-a` | Run step 08 asynchronously | false |
-| `-s` | Skip cleanup | false |
-| `-f` | Force reset (destroy disks) | false |
+| Flag | Description                        | Default |
+| ---- | ---------------------------------- | ------- |
+| `-e` | Execute steps (dry run if omitted) | false   |
+| `-a` | Run step 08 asynchronously         | false   |
+| `-s` | Skip cleanup                       | false   |
+| `-f` | Force reset (destroy disks)        | false   |
 
 **Benefits of function-based approach**:
+
 - Clear step dependencies
 - Explicit parameter passing
 - Easy to test individual steps
 - No shared state between steps
 - Dry run mode for planning
-**Helper function usage**:
+  **Helper function usage**:
 
 ```bash
 # Get all IPv4 addresses from network
