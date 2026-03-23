@@ -239,7 +239,7 @@ echo "[3/7] Waiting for nodes to be ready..."
 echo "  Waiting for master ($MASTER_IP)..."
 MAX_WAIT=120
 WAITED=0
-while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --insecure &>/dev/null; do
+while ! talosctl get version --nodes "$MASTER_IP" --insecure &>/dev/null; do
     if (( WAITED >= MAX_WAIT )); then
         echo "ERROR: Master not responding after ${MAX_WAIT}s"
         exit 1
@@ -255,7 +255,7 @@ for i in $(seq 1 $WORKER_COUNT); do
     WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     echo "  Waiting for worker $i ($WORKER_IP)..."
     WAITED=0
-    while ! talosctl --endpoints "$WORKER_IP" --nodes "$WORKER_IP" get version --insecure &>/dev/null; do
+    while ! talosctl get version --nodes "$WORKER_IP" --insecure &>/dev/null; do
         if (( WAITED >= MAX_WAIT )); then
             echo "ERROR: Worker $i not responding after ${MAX_WAIT}s"
             exit 1
@@ -278,22 +278,34 @@ echo "[4/7] Bootstrapping cluster (before apply-config)..."
 # Bootstrap while node is still in maintenance mode
 
 echo "  Bootstrapping cluster..."
-# Bootstrap in maintenance mode - no talosconfig needed
-# Note: Talos v1.11.x bootstrap doesn't support --insecure flag
-# It connects without auth when node is in maintenance mode
-if talosctl bootstrap --nodes "$MASTER_IP" --endpoints "$MASTER_IP"; then
-    echo "  ✓ Kubernetes bootstrapped"
+
+# For Talos v1.12.x, we need to use --insecure flag AFTER the command
+# Try bootstrap with different connection methods
+if talosctl bootstrap --nodes "$MASTER_IP" --insecure 2>/dev/null; then
+    echo "  ✓ Kubernetes bootstrapped (method 1: --insecure after command)"
+elif talosctl bootstrap --endpoints "$MASTER_IP" --nodes "$MASTER_IP" 2>/dev/null; then
+    echo "  ✓ Kubernetes bootstrapped (method 2: with endpoints)"
 else
-    echo "  ERROR: Bootstrap failed"
-    echo "  Make sure Talos is running and accessible"
-    exit 1
+    # Last resort: try with generated talosconfig
+    echo "  Trying bootstrap with talosconfig..."
+    if talosctl bootstrap --nodes "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>/dev/null; then
+        echo "  ✓ Kubernetes bootstrapped (method 3: with talosconfig)"
+    else
+        echo "  ERROR: Bootstrap failed"
+        echo ""
+        echo "  Talos 1.12.x bootstrap troubleshooting:"
+        echo "  1. Ensure VMs are booted from ISO (maintenance mode)"
+        echo "  2. Check Talos is accessible: talosctl get version --nodes $MASTER_IP --insecure"
+        echo "  3. Try manual bootstrap: talosctl bootstrap --nodes $MASTER_IP --insecure"
+        echo ""
+        exit 1
+    fi
 fi
 
 # Now apply config (node will reboot but certs are already valid)
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
-talosctl apply-config --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
-    --file "$CONFIG_DIR/controlplane.yaml" \
-    --insecure
+# For Talos v1.12.x, --insecure must come AFTER the command
+talosctl apply-config --nodes "$MASTER_IP" --file "$CONFIG_DIR/controlplane.yaml" --insecure
 echo "  ✓ Controlplane config applied"
 
 # Apply to workers
@@ -301,9 +313,7 @@ for i in $(seq 1 $WORKER_COUNT); do
     WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
     echo "  Applying worker config to $WORKER_NAME ($WORKER_IP)..."
-    talosctl apply-config --endpoints "$WORKER_IP" --nodes "$WORKER_IP" \
-        --file "$CONFIG_DIR/worker.yaml" \
-        --insecure
+    talosctl apply-config --nodes "$WORKER_IP" --file "$CONFIG_DIR/worker.yaml" --insecure
     echo "  ✓ Worker config applied to $WORKER_NAME"
 done
 echo ""
@@ -315,7 +325,7 @@ echo "[5/7] Waiting for master to reboot..."
 
 MAX_WAIT=120
 WAITED=0
-while ! talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get version --insecure &>/dev/null; do
+while ! talosctl get version --nodes "$MASTER_IP" --insecure &>/dev/null; do
     if (( WAITED >= MAX_WAIT )); then
         echo "ERROR: Master not ready after ${MAX_WAIT}s"
         exit 1
@@ -329,8 +339,9 @@ echo "  ✓ Master rebooted (${WAITED}s)"
 # Verify bootstrap worked
 echo "  Verifying bootstrap..."
 sleep 5
-if talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members --insecure &>/dev/null; then
-    talosctl --endpoints "$MASTER_IP" --nodes "$MASTER_IP" get members --insecure 2>/dev/null | head -10
+# For Talos v1.12.x, --insecure must come AFTER the command
+if talosctl get members --nodes "$MASTER_IP" --insecure &>/dev/null; then
+    talosctl get members --nodes "$MASTER_IP" --insecure 2>/dev/null | head -10
     echo "  ✓ Bootstrap verified"
 
     # Change boot order to disk
@@ -365,9 +376,8 @@ if [[ "$KUBECTL_AVAILABLE" == "true" ]]; then
     done
 
     # Try to get kubeconfig (requires successful bootstrap)
-    if talosctl kubeconfig "$CONFIG_DIR/kubeconfig" \
-        --endpoints "$MASTER_IP" --nodes "$MASTER_IP" \
-        --force 2>/dev/null; then
+    # For Talos v1.12.x, use --nodes with --insecure after kubeconfig command
+    if talosctl kubeconfig "$CONFIG_DIR/kubeconfig" --nodes "$MASTER_IP" --force --insecure 2>/dev/null; then
         echo "  ✓ kubeconfig fetched"
         export KUBECONFIG="$CONFIG_DIR/kubeconfig"
     elif [[ -f "$CONFIG_DIR/kubeconfig" ]]; then
