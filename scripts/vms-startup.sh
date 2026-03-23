@@ -268,19 +268,19 @@ echo "  Waiting for Talos API to be accessible..."
 echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
 
-# Function to check if Talos API is accessible
+# Function to check if Talos API is accessible (with short timeout)
 check_talos_api() {
     local ip="$1"
-    # Try talosctl with timeout
-    timeout 3 talosctl get version --nodes "$ip" --insecure &>/dev/null
+    # Use timeout with talosctl get version
+    timeout 2 talosctl get version --nodes "$ip" --insecure &>/dev/null
     return $?
 }
 
-# Function to check if port 50000 is open
-check_port_50000() {
+# Function to check if Talos services are running
+check_talos_services() {
     local ip="$1"
-    # Try connecting to Talos API port (50000)
-    timeout 2 bash -c "echo > /dev/tcp/$ip/50000" 2>/dev/null
+    # Try to get services list (faster than get version for some cases)
+    timeout 2 talosctl services --nodes "$ip" --insecure &>/dev/null
     return $?
 }
 
@@ -309,16 +309,16 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
             done
 
             if [[ -n "$VM_IP" ]]; then
-                # Check Talos API accessibility
+                # Check Talos API accessibility with get version
                 if check_talos_api "$VM_IP"; then
                     echo "    ✓ $ACTUAL_VM ($VM_IP) - Talos API ready"
                     READY_COUNT=$((READY_COUNT + 1))
                     continue
-                # Fallback: Check if port 50000 is open
-                elif check_port_50000 "$VM_IP"; then
-                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Port 50000 open, API starting (state: $VM_STATE)"
+                # Fallback: Try services check
+                elif check_talos_services "$VM_IP"; then
+                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Services responding, API starting (state: $VM_STATE)"
                 else
-                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Waiting for port 50000 (state: $VM_STATE)"
+                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Talos API not responding (state: $VM_STATE)"
                 fi
             else
                 echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
