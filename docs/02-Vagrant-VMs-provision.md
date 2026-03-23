@@ -125,85 +125,68 @@ vagrant ssh talos-master
 ```
 
 ## Scripts Details
-
 ### vms-startup.sh
 
-The startup script executes the following modular steps **asynchronously**:
+The startup script calls each step as a **function** with explicit parameters from `.env`.
 
-| Step | Script                      | Description                                             |
-| ---- | --------------------------- | ------------------------------------------------------- |
-| 00   | `00-helper-functions.sh`    | Common functions (get_libvirt_ips, check_machine_ready) |
-| 01   | `01-authenticate-sudo.sh`   | Sudo authentication (cached for 15 min)                 |
-| 02   | `02-check-prerequisites.sh` | Verify Vagrantfile, vagrant-libvirt, libvirtd           |
-| 03   | `03-prepare-iso.sh`         | Download/verify Talos ISO                               |
-| 04   | `04-copy-iso-to-pool.sh`    | Copy ISO to storage pool                                |
-| 05   | `05-setup-network.sh`       | Run `prepare-network.sh`                                |
-| 06   | `06-cleanup-vms.sh`         | Remove old VM disks (unless `-s` flag)                  |
-| 07   | `07-start-vms.sh`           | Start VMs via Vagrant                                   |
-| 08   | `08-wait-for-talos.sh`      | Wait for Talos READY (runs async)                       |
-| 09   | `09-eject-iso.sh`           | Eject ISO from all VMs, set disk boot                   |
-| 10   | `10-reboot-verify.sh`       | Reboot VMs, verify disk boot (polls IPs)                |
-| 11   | `11-summary.sh`             | Display summary and next steps                          |
+| Step | Function | Description |
+|------|----------|-------------|
+| 01   | `step_01_authenticate_sudo` | Sudo authentication (cached for 15 min) |
+| 02   | `step_02_check_prerequisites` | Verify Vagrantfile, vagrant-libvirt, libvirtd |
+| 03   | `step_03_prepare_iso` | Download/verify Talos ISO |
+| 04   | `step_04_copy_iso_to_pool` | Copy ISO to storage pool |
+| 05   | `step_05_setup_network` | Run `prepare-network.sh` |
+| 06   | `step_06_cleanup_vms` | Remove old VM disks (unless `-s` flag) |
+| 07   | `step_07_start_vms` | Start VMs via Vagrant |
+| 08   | `step_08_wait_for_talos` | Wait for Talos READY (can run async with `-a`) |
+| 09   | `step_09_eject_iso` | Eject ISO from all VMs, set disk boot |
+| 10   | `step_10_reboot_verify` | Reboot VMs, verify disk boot |
+| 11   | `step_11_summary` | Display summary and next steps |
 
 **Execution flow**:
 
 ```
-All steps (01-11) start simultaneously in background
+Steps 01-07: Run synchronously (sequential)
      ↓
-Main script waits for all steps to complete
-     ↓
-Reports success/failure for each step
+Step 08: Runs sync (default) or async (with -a flag)
+     ↓ (wait if async)
+Steps 09-11: Run synchronously (sequential)
 ```
 
-**Total time**: ~5-10 minutes (includes Talos boot time + reboot verification)
-
-**Benefits of async execution**:
-
-- Faster overall execution (parallel processing)
-- Non-blocking operations
-- Independent step failure doesn't stop other steps
-- Better resource utilization
-
-**Script structure**:
-
-```
-scripts/vms-startup.sh          # Main script (75 lines)
-scripts/vms-startup/
-├── 00-setup.sh                 # Common setup (sources .env)
-├── 00-helper-functions.sh      # Common functions
-├── 01-authenticate-sudo.sh     # Step 1: Sudo auth
-├── 02-check-prerequisites.sh   # Step 2: Prerequisites
-├── 03-prepare-iso.sh           # Step 3: ISO preparation
-├── 04-copy-iso-to-pool.sh      # Step 4: Copy ISO
-├── 05-setup-network.sh         # Step 5: Network setup
-├── 06-cleanup-vms.sh           # Step 6: Cleanup disks
-├── 07-start-vms.sh             # Step 7: Start VMs
-├── 08-wait-for-talos.sh        # Step 8: Wait for READY
-├── 09-eject-iso.sh             # Step 9: Eject ISO
-├── 10-reboot-verify.sh         # Step 10: Reboot & verify
-└── 11-summary.sh               # Step 11: Summary
-```
-
-**Independent .env sourcing**:
-
-Each step script sources `.env` independently via `00-setup.sh`:
+**Usage**:
 
 ```bash
-# Each step can run standalone with correct environment
-NETWORK_NAME=cluster-talos-net bash scripts/vms-startup/02-check-prerequisites.sh
+# Dry run (show plan without executing)
+./scripts/vms-startup.sh
 
-# Or async steps share no state - each loads its own .env
-bash scripts/vms-startup/08-wait-for-talos.sh &
+# Execute steps synchronously
+./scripts/vms-startup.sh -e
+
+# Execute with async step 08
+./scripts/vms-startup.sh -e -a
+
+# Skip cleanup
+./scripts/vms-startup.sh -e -s
+
+# Force reset (destroy disks)
+./scripts/vms-startup.sh -e -f
 ```
 
-**Key improvements**:
+**Flags**:
 
-- Steps 08-10 use `libvirt_get_dhcp_ips()` with named parameters
-- Intuitive function signature: `libvirt_get_dhcp_ips -n <network> -p <protocol>`
-- No complex VM name ↔ IP matching logic
-- Faster execution (fewer virsh calls)
-- Simpler, more maintainable code
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-e` | Execute steps (dry run if omitted) | false |
+| `-a` | Run step 08 asynchronously | false |
+| `-s` | Skip cleanup | false |
+| `-f` | Force reset (destroy disks) | false |
 
+**Benefits of function-based approach**:
+- Clear step dependencies
+- Explicit parameter passing
+- Easy to test individual steps
+- No shared state between steps
+- Dry run mode for planning
 **Helper function usage**:
 
 ```bash
