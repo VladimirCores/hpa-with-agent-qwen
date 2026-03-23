@@ -38,7 +38,7 @@ unless USE_BOX || File.exist?(TALOS_IMAGE_PATH)
 end
 
 # Function to configure a Talos VM
-def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
+def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size_gb = 5)
   config.vm.define name do |vm|
     vm.vm.hostname = name
 
@@ -62,15 +62,26 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
 
       # Boot from ISO if not using box
       if ENV['USE_BOX'] != 'true'
+        # CDROM with Talos ISO (boot first for installation)
         domain.storage :file,
                        device: :cdrom,
                        path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
-        domain.boot 'cdrom'  # Boot from ISO first
-        domain.boot 'hd'     # Then disk
+        # Persistent disk for Talos installation (boot second after install)
+        domain.storage :file,
+                       size: "#{disk_size_gb}G",
+                       bus: 'virtio',
+                       cache: 'none'
+        # Boot order: CDROM first (for install), then disk (for normal operation)
+        domain.boot 'cdrom'
+        domain.boot 'hd'
+      else
+        # Using box - boot from disk only
+        domain.storage :file,
+                       size: "#{disk_size_gb}G",
+                       bus: 'virtio',
+                       cache: 'none'
+        domain.boot 'hd'
       end
-
-      # Persistent disk
-      domain.storage :file, size: '5G', bus: 'virtio', cache: 'none'
     end
   end
 end
@@ -80,12 +91,14 @@ Vagrant.configure("2") do |config|
   # Static IP from .env file (MASTER_IP=10.0.0.10) via DHCP reservation
   # MAC address: ${MAC_PREFIX}:01
   master_mac = "#{MAC_PREFIX}:01"
+  master_disk = (ENV['MASTER_DISK'] || 5).to_i
   configure_talos_vm(config,
                      ENV['MASTER_NAME'] || "talos-master",
                      (ENV['MASTER_CPUS'] || 4).to_i,
                      (ENV['MASTER_MEMORY'] || 4096).to_i,
                      ENV['MASTER_IP'] || "10.0.0.10",
-                     master_mac)
+                     master_mac,
+                     master_disk)
 
   # Worker Nodes configuration
   # Static IP base from .env file (WORKER_IP_BASE=10.0.0.11)
@@ -96,6 +109,7 @@ Vagrant.configure("2") do |config|
   worker_ip_base = ENV['WORKER_IP_BASE'] || "10.0.0.11"
   worker_cpus = (ENV['WORKER_CPUS'] || 1).to_i
   worker_memory = (ENV['WORKER_MEMORY'] || 2048).to_i
+  worker_disk = (ENV['WORKER_DISK'] || 5).to_i
 
   # Parse the base IP to generate sequential IPs for worker nodes
   ip_parts = worker_ip_base.split('.')
@@ -107,7 +121,7 @@ Vagrant.configure("2") do |config|
     # Worker MAC: 10 + (i+1) in hex = 0b, 0c, 0d, etc.
     worker_mac_suffix = "%02x" % (11 + i)
     worker_mac = "#{MAC_PREFIX}:#{worker_mac_suffix}"
-    configure_talos_vm(config, name, worker_cpus, worker_memory, ip, worker_mac)
+    configure_talos_vm(config, name, worker_cpus, worker_memory, ip, worker_mac, worker_disk)
   end
 
   # Global libvirt settings
