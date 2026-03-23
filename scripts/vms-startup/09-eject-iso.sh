@@ -2,6 +2,10 @@
 # Step 09: Eject ISO and set disk boot
 # Ejects ISO from all VMs and updates boot order to disk-only
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 echo "[9/11] Ejecting ISO and setting disk boot..."
 
 # Get all VMs

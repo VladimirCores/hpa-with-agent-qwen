@@ -2,6 +2,10 @@
 # Step 04: Copy ISO to storage pool
 # Copies ISO to libvirt storage pool for VM access
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 echo "[4/11] Copying ISO to storage pool..."
 
 STORAGE_POOL="${STORAGE_POOL:-default}"

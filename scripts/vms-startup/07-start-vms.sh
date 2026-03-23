@@ -2,6 +2,10 @@
 # Step 07: Start all VMs with Vagrant
 # Starts VMs using Vagrant with libvirt provider
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 echo "[7/11] Starting VMs with Vagrant..."
 
 cd "$PROJECT_ROOT"

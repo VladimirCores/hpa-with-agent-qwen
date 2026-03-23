@@ -4,11 +4,12 @@
 # =============================================================================
 # This script starts all Talos cluster VMs with proper cleanup and verification.
 # All steps run asynchronously with progress monitoring.
+# Each step sources its own .env file independently.
 # =============================================================================
 
 set -euo pipefail
 
-# Load environment variables
+# Load environment variables (for main script only)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 STEPS_DIR="$SCRIPT_DIR/vms-startup"
@@ -34,9 +35,6 @@ done
 
 echo "=== Talos Cluster VM Startup ==="
 echo ""
-
-# Source helper functions
-source "$STEPS_DIR/00-helper-functions.sh"
 
 # Array to track background PIDs
 declare -a STEP_PIDS=()

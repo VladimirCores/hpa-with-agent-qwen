@@ -2,13 +2,17 @@
 # Step 08: Wait for Talos to boot from ISO
 # Polls VMs until Talos API is accessible (READY=true)
 #
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 # Usage:
 #   Sync:  bash 08-wait-for-talos.sh
 #   Async: bash 08-wait-for-talos.sh &  # Runs in background
 
 # Ensure helper functions are loaded
 if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     source "$SCRIPT_DIR/00-helper-functions.sh"
 fi
 

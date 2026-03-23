@@ -2,6 +2,10 @@
 # Step 11: Summary
 # Displays startup summary and next steps
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 echo "[11/11] Startup Summary"
 echo "==================="
 echo "Cluster Name: Talos Cluster"

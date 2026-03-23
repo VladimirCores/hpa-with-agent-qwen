@@ -2,6 +2,10 @@
 # Step 06: Clean up existing VMs and disks
 # Removes old VM disks to ensure fresh Talos installation
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 if [[ "$SKIP_CLEANUP" == "false" ]]; then
     echo "[6/11] Cleaning up existing VMs and disks..."
 

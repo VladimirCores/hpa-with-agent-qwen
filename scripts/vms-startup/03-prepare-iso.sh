@@ -2,6 +2,10 @@
 # Step 03: Prepare Talos ISO image
 # Checks if ISO exists or downloads it
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 echo "[3/11] Preparing Talos ISO image..."
 
 if [[ -f "$TALOS_IMAGE_PATH" ]]; then

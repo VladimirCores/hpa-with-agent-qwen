@@ -2,6 +2,10 @@
 # Step 01: Authenticate sudo
 # Authenticates sudo and caches credentials for the script duration
 
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 SUDO_CACHE_FILE="$PROJECT_ROOT/.sudo_cache_$(whoami)"
 SUDO_CACHE_DURATION=900  # 15 minutes in seconds
 

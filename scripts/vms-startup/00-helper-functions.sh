@@ -2,6 +2,10 @@
 # Step 00: Helper Functions
 # Common functions used across all steps
 
+# Source common setup first
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
 # Get DHCP lease IPs from a libvirt network
 # Usage: libvirt_get_dhcp_ips [--network NAME] [--protocol ipv4|ipv6|all] [--raw]
 #

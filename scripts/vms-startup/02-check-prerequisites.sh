@@ -2,7 +2,11 @@
 # Step 02: Check prerequisites
 # Verifies Vagrantfile, vagrant-libvirt plugin, and libvirtd
 
-echo "[2/11] Checking prerequisites..."
+# Source common setup
+STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$STEP_DIR/00-setup.sh"
+
+echo "[2/12] Checking prerequisites..."
 
 # Check Vagrantfile exists
 if [[ ! -f "$PROJECT_ROOT/Vagrantfile" ]]; then
