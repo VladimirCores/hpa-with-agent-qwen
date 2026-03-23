@@ -3,6 +3,7 @@
 # Create Talos Vagrant Box from ISO
 # =============================================================================
 # This script creates a reusable Vagrant box from the Talos ISO.
+# NOTE: This is a complex operation. Consider using ISO boot instead.
 # =============================================================================
 
 set -euo pipefail
@@ -18,8 +19,6 @@ set +a
 BOX_NAME="${BOX_NAME:-talos}"
 BOX_VERSION="${BOX_VERSION:-1.11.5}"
 ISO_PATH="${PROJECT_ROOT}/metal-amd64.iso"
-BOX_DIR="${PROJECT_ROOT}/box-${BOX_NAME}"
-BOX_OUTPUT="${BOX_DIR}/${BOX_NAME}.box"
 
 echo "=== Create Talos Vagrant Box ==="
 echo ""
@@ -34,80 +33,37 @@ if [[ ! -f "$ISO_PATH" ]]; then
     exit 1
 fi
 
-# Create box directory
-mkdir -p "$BOX_DIR"
-
-# Create metadata.json
-cat > "${BOX_DIR}/metadata.json" <<EOF
-{
-    "name": "${BOX_NAME}",
-    "description": "Talos Linux ${BOX_VERSION}",
-    "version": "${BOX_VERSION}",
-    "provider": "libvirt"
-}
-EOF
-
-# Create minimal Vagrantfile for box
-cat > "${BOX_DIR}/Vagrantfile" <<'EOF'
-Vagrant.configure("2") do |config|
-  config.vm.provider :libvirt do |libvirt|
-    libvirt.driver = "qemu"
-  end
-end
-EOF
-
-echo "Creating box from ISO..."
-echo "This will take a few minutes..."
+echo "Creating a Vagrant box from Talos ISO is a manual process."
 echo ""
-
-# Create box using vagrant package with ISO
-cd "$BOX_DIR"
-
-# Create temporary VM to build box
-cat > Vagrantfile.build <<VBFILE
-Vagrant.configure("2") do |config|
-  config.vm.box = "generic/empty"
-  config.vm.provider :libvirt do |domain|
-    domain.memory = 2048
-    domain.cpus = 2
-    domain.storage :file, device: :cdrom, path: "${ISO_PATH}"
-    domain.boot 'cdrom'
-    domain.boot 'hd'
-    domain.storage :file, size: '5G', bus: 'virtio'
-  end
-end
-VBFILE
-
-echo "Step 1: Creating temporary VM..."
-vagrant -f Vagrantfile.build up --provider=libvirt || true
-
+echo "Recommended approach: Use ISO boot (default in Vagrantfile)"
 echo ""
-echo "Step 2: Waiting for Talos to boot (60 seconds)..."
-sleep 60
-
+echo "If you need a box, follow these manual steps:"
 echo ""
-echo "Step 3: Stopping VM..."
-vagrant -f Vagrantfile.build halt || true
-
+echo "1. Create a VM manually in virt-manager:"
+echo "   - Boot from Talos ISO"
+echo "   - Let Talos install to disk"
+echo "   - Shutdown the VM"
 echo ""
-echo "Step 4: Packaging as box..."
-vagrant -f Vagrantfile.build package --output "${BOX_NAME}.box"
-
+echo "2. Export the VM as a box:"
+echo "   virsh dumpxml <vm-name> > domain.xml"
+echo "   virt-sysprep -d <vm-name>"
 echo ""
-echo "Step 5: Adding box to Vagrant..."
-vagrant box add "${BOX_NAME}" "${BOX_NAME}.box" --force
-
+echo "3. Create box metadata:"
+echo "   mkdir box-files && cd box-files"
+echo "   cat > metadata.json <<EOF"
+echo "   {"
+echo "       \"name\": \"${BOX_NAME}\","
+echo "       \"description\": \"Talos Linux ${BOX_VERSION}\","
+echo "       \"version\": \"${BOX_VERSION}\","
+echo "       \"provider\": \"libvirt\""
+echo "   }"
+echo "   EOF"
 echo ""
-echo "Step 6: Cleaning up..."
-vagrant -f Vagrantfile.build destroy -f || true
-rm -f Vagrantfile.build
-
+echo "4. Package the box:"
+echo "   tar czf ${BOX_NAME}.box metadata.json domain.xml"
 echo ""
-echo "=== Box Created ==="
+echo "5. Add to Vagrant:"
+echo "   vagrant box add ${BOX_NAME} ${BOX_NAME}.box"
 echo ""
-echo "Box name: ${BOX_NAME}"
-echo "Box location: ${BOX_OUTPUT}"
-echo ""
-echo "To use this box in Vagrantfile:"
-echo "  config.vm.box = \"${BOX_NAME}\""
+echo "Alternatively, set USE_BOX=false in .env to use ISO boot (recommended)."
 echo ""

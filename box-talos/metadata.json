@@ -1,0 +1,6 @@
+{
+    "name": "talos",
+    "description": "Talos Linux latest",
+    "version": "latest",
+    "provider": "libvirt"
+}

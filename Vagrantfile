@@ -17,10 +17,10 @@ load_env
 # Box Configuration
 USE_BOX = ENV['USE_BOX'] == 'true'
 BOX_NAME = ENV['BOX_NAME'] || 'talos'
-BOX_VERSION = ENV['BOX_VERSION'] || '1.11.5'
+BOX_VERSION = ENV['BOX_VERSION'] || 'v1.11.5'
 
 # Talos Disk Image Configuration
-TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/v#{BOX_VERSION}/metal-amd64.iso"
+TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/#{BOX_VERSION}/metal-amd64.iso"
 TALOS_IMAGE_PATH = ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso"
 
 # MAC Address Configuration
