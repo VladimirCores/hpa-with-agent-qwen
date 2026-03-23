@@ -14,15 +14,20 @@ def load_env
 end
 load_env
 
+# Box Configuration
+USE_BOX = ENV['USE_BOX'] == 'true'
+BOX_NAME = ENV['BOX_NAME'] || 'talos'
+BOX_VERSION = ENV['BOX_VERSION'] || '1.11.5'
+
 # Talos Disk Image Configuration
-TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/v1.11.5/metal-amd64.iso"
+TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/v#{BOX_VERSION}/metal-amd64.iso"
 TALOS_IMAGE_PATH = ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso"
 
 # MAC Address Configuration
 MAC_PREFIX = ENV['MAC_PREFIX'] || "52:54:00:00:00"
 
-# Ensure Talos image exists
-unless File.exist?(TALOS_IMAGE_PATH)
+# Ensure Talos image exists (if not using box)
+unless USE_BOX || File.exist?(TALOS_IMAGE_PATH)
   puts "Downloading Talos Linux ISO..."
   system("curl -L -o #{TALOS_IMAGE_PATH} #{TALOS_IMAGE_URL}") || system("wget -O #{TALOS_IMAGE_PATH} #{TALOS_IMAGE_URL}")
   unless File.exist?(TALOS_IMAGE_PATH)
@@ -37,6 +42,11 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
   config.vm.define name do |vm|
     vm.vm.hostname = name
 
+    # Use box if configured, otherwise use ISO
+    if ENV['USE_BOX'] == 'true'
+      vm.vm.box = ENV['BOX_NAME'] || 'talos'
+    end
+
     # Network with static DHCP reservation
     vm.vm.network :private_network,
                   type: 'dhcp',
@@ -50,12 +60,14 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
       domain.memory = memory_mb
       domain.cpus = cpus
 
-      # Boot from ISO first (for installation), then disk
-      domain.storage :file,
-                     device: :cdrom,
-                     path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
-      domain.boot 'cdrom'  # Boot from ISO first
-      domain.boot 'hd'     # Then disk
+      # Boot from ISO if not using box
+      if ENV['USE_BOX'] != 'true'
+        domain.storage :file,
+                       device: :cdrom,
+                       path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
+        domain.boot 'cdrom'  # Boot from ISO first
+        domain.boot 'hd'     # Then disk
+      end
 
       # Persistent disk
       domain.storage :file, size: '5G', bus: 'virtio', cache: 'none'
