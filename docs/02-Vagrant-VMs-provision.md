@@ -128,7 +128,7 @@ vagrant ssh talos-master
 
 ### vms-startup.sh
 
-The startup script executes the following modular steps:
+The startup script executes the following modular steps **asynchronously**:
 
 | Step | Script                      | Description                                             |
 | ---- | --------------------------- | ------------------------------------------------------- |
@@ -148,14 +148,21 @@ The startup script executes the following modular steps:
 **Execution flow**:
 
 ```
-Steps 01-07: Run synchronously (sequential)
+All steps (01-11) start simultaneously in background
      ↓
-Step 08: Runs asynchronously (background)
-     ↓ (wait for completion)
-Steps 09-11: Run synchronously (sequential)
+Main script waits for all steps to complete
+     ↓
+Reports success/failure for each step
 ```
 
 **Total time**: ~5-10 minutes (includes Talos boot time + reboot verification)
+
+**Benefits of async execution**:
+
+- Faster overall execution (parallel processing)
+- Non-blocking operations
+- Independent step failure doesn't stop other steps
+- Better resource utilization
 
 **Script structure**:
 

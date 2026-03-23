@@ -3,6 +3,7 @@
 # Start Talos Cluster VMs
 # =============================================================================
 # This script starts all Talos cluster VMs with proper cleanup and verification.
+# All steps run asynchronously with progress monitoring.
 # =============================================================================
 
 set -euo pipefail
@@ -37,33 +38,43 @@ echo ""
 # Source helper functions
 source "$STEPS_DIR/00-helper-functions.sh"
 
-# Execute steps 01-07 synchronously
-for step_file in "$STEPS_DIR"/0[1-7]-*.sh; do
-    if [[ -f "$step_file" ]]; then
-        source "$step_file"
-    fi
-done
+# Array to track background PIDs
+declare -a STEP_PIDS=()
 
-# Step 08: Run asynchronously (waiting for Talos boot)
-echo "Starting step 08 (wait for Talos boot) in background..."
-bash "$STEPS_DIR/08-wait-for-talos.sh" &
-STEP08_PID=$!
+# Execute all steps asynchronously
+echo "Starting all steps asynchronously..."
+echo ""
 
-# Wait for step 08 to complete
-echo "Waiting for Talos boot to complete (PID: $STEP08_PID)..."
-wait $STEP08_PID
-STEP08_EXIT=$?
-
-if [[ $STEP08_EXIT -ne 0 ]]; then
-    echo "WARNING: Step 08 completed with exit code $STEP08_EXIT"
-fi
-
-# Continue with steps 09-11 synchronously
 for step_file in "$STEPS_DIR"/[0-9][0-9]-*.sh; do
     if [[ -f "$step_file" ]]; then
-        step_num=$(basename "$step_file" | cut -d'-' -f1)
-        if [[ "$step_num" -gt 8 ]]; then
-            source "$step_file"
-        fi
+        step_name=$(basename "$step_file" | sed 's/^[0-9]*-//' | sed 's/\.sh$//')
+        echo "Starting step: $step_name (PID will be assigned)..."
+        bash "$step_file" &
+        STEP_PIDS+=($!)
+        echo "  → Started with PID ${STEP_PIDS[-1]}"
     fi
 done
+
+echo ""
+echo "All steps started. Waiting for completion..."
+echo ""
+
+# Wait for all steps to complete
+FAILED=0
+for i in "${!STEP_PIDS[@]}"; do
+    pid=${STEP_PIDS[$i]}
+    if wait $pid; then
+        echo "✓ Step $((i+1)) completed successfully (PID: $pid)"
+    else
+        echo "✗ Step $((i+1)) failed (PID: $pid)"
+        FAILED=$((FAILED + 1))
+    fi
+done
+
+echo ""
+if [[ $FAILED -gt 0 ]]; then
+    echo "WARNING: $FAILED step(s) completed with errors"
+    exit 1
+else
+    echo "=== All steps completed successfully ==="
+fi
