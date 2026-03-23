@@ -144,7 +144,7 @@ STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
 
 # Remove ALL volumes from talos-pool (ISO and VM disks)
 echo "  Removing all volumes from $STORAGE_POOL..."
-for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | awk '{print $1}'); do
+virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | while read -r vol rest; do
     [[ -z "$vol" ]] && continue
     echo "    Removing: $vol"
     virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null && \
