@@ -2,6 +2,12 @@
 # Step 08: Wait for Talos to boot from ISO
 # Polls VMs until Talos API is accessible (READY=true)
 
+# Ensure helper functions are loaded
+if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/00-helper-functions.sh"
+fi
+
 echo "[8/11] Waiting for Talos to boot from ISO..."
 
 # Wait for each VM to be accessible via Talos API
