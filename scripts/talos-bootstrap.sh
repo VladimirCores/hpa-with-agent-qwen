@@ -145,8 +145,19 @@ if [[ -f "$SECRETS_FILE" ]]; then
     echo "  Secrets bundle already exists: $SECRETS_FILE"
     echo "  ✓ Using existing secrets"
 else
-    echo "  Generating new secrets bundle..."
-    talosctl gen secrets --output-file "$SECRETS_FILE"
+    # Get Talos version from running VM for secrets generation
+    echo "  Detecting Talos version from VM..."
+    TALOS_VERSION=$(talosctl get version --nodes "$MASTER_IP" --insecure 2>/dev/null | grep "runtime" | awk '{print $NF}')
+
+    if [[ -n "$TALOS_VERSION" ]]; then
+        echo "  ✓ Detected Talos version: $TALOS_VERSION"
+        echo "  Generating secrets bundle with --talos-version $TALOS_VERSION..."
+        talosctl gen secrets --output-file "$SECRETS_FILE" --talos-version "$TALOS_VERSION"
+    else
+        echo "  WARNING: Could not detect Talos version, using default"
+        talosctl gen secrets --output-file "$SECRETS_FILE"
+    fi
+
     if [[ -f "$SECRETS_FILE" ]]; then
         echo "  ✓ Secrets bundle generated"
     else
@@ -172,11 +183,23 @@ rm -f "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key
 echo "  Generating configs for cluster: $CLUSTER_NAME"
 echo "  Endpoint: https://$MASTER_IP:6443"
 
-# Use system installer (matches running Talos version)
-# Generate with correct endpoint from the start, using secrets bundle
-talosctl gen config "$CLUSTER_NAME" "https://$MASTER_IP:6443" \
-    --output-dir "$CONFIG_DIR" \
-    --with-secrets "$SECRETS_FILE"
+# Get Talos version from running VM (ensures config matches ISO version)
+echo "  Detecting Talos version from VM..."
+TALOS_VERSION=$(talosctl get version --nodes "$MASTER_IP" --insecure 2>/dev/null | grep "runtime" | awk '{print $NF}')
+
+if [[ -n "$TALOS_VERSION" ]]; then
+    echo "  ✓ Detected Talos version: $TALOS_VERSION"
+    echo "  Generating configs with --talos-version $TALOS_VERSION..."
+    talosctl gen config "$CLUSTER_NAME" "https://$MASTER_IP:6443" \
+        --output-dir "$CONFIG_DIR" \
+        --with-secrets "$SECRETS_FILE" \
+        --talos-version "$TALOS_VERSION"
+else
+    echo "  WARNING: Could not detect Talos version, using default"
+    talosctl gen config "$CLUSTER_NAME" "https://$MASTER_IP:6443" \
+        --output-dir "$CONFIG_DIR" \
+        --with-secrets "$SECRETS_FILE"
+fi
 
 if [[ -f "$CONFIG_DIR/controlplane.yaml" ]] && [[ -f "$CONFIG_DIR/worker.yaml" ]]; then
     echo "  ✓ Configurations generated"
