@@ -8,12 +8,12 @@ The Vagrant configuration creates a Talos cluster with one master node and confi
 
 ### Cluster Architecture
 
-| Component        | Description                                    |
-| ---------------- | ---------------------------------------------- |
-| Provider         | libvirt (QEMU/KVM)                             |
-| Network          | Isolated NAT network with static DHCP          |
-| Storage          | Directory-based storage pool                   |
-| Boot Media       | Talos ISO (downloaded automatically)           |
+| Component  | Description                           |
+| ---------- | ------------------------------------- |
+| Provider   | libvirt (QEMU/KVM)                    |
+| Network    | Isolated NAT network with static DHCP |
+| Storage    | Directory-based storage pool          |
+| Boot Media | Talos ISO (downloaded automatically)  |
 
 ### Default VM Configuration
 
@@ -91,35 +91,19 @@ Start without cleanup (preserves existing VMs):
 
 ### Stop Cluster
 
-Stop VMs (preserves volumes and network):
+Full cleanup (default - removes everything):
 
 ```bash
 ./scripts/vms-cleanup.sh
 ```
 
-Stop VMs and clean volumes:
-
-```bash
-./scripts/vms-cleanup.sh -v
-```
-
-Stop VMs and destroy network:
+Preserve network during cleanup:
 
 ```bash
 ./scripts/vms-cleanup.sh -n
 ```
 
-Full cleanup (VMs + volumes + network + sudo cache):
-
-```bash
-./scripts/vms-cleanup.sh -f
-```
-
-Clear sudo cache only:
-
-```bash
-./scripts/vms-cleanup.sh -c
-```
+> **Note**: Full cleanup removes VMs, volumes, network, and storage pool. Everything is recreated on next `vms-startup.sh`.
 
 ### Manual Vagrant Commands
 
@@ -158,15 +142,20 @@ The startup script performs the following steps:
 
 ### vms-cleanup.sh
 
-The cleanup script supports multiple cleanup levels:
+The cleanup script performs full cleanup by default:
 
-| Flag | Action |
-| ---- | ------ |
-| (none) | Stop VMs only |
-| `-v` | Stop VMs + remove disk volumes |
-| `-n` | Stop VMs + destroy network |
-| `-f` | Full cleanup (VMs + volumes + network) |
-| `-c` | Clear sudo cache |
+| Action              | Default |
+| ------------------- | ------- |
+| Stop VMs            | ✓ Yes   |
+| Remove volumes      | ✓ Yes   |
+| Destroy network     | ✓ Yes   |
+| Remove storage pool | ✓ Yes   |
+
+Options:
+
+- `-n` - Preserve network (still removes VMs, volumes, and pool)
+
+> **Note**: Everything is recreated on next `vms-startup.sh` run.
 
 ## Verification
 
