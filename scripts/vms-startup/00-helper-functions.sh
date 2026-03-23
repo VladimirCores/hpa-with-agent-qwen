@@ -23,7 +23,7 @@ libvirt_get_dhcp_ips() {
     local network=""
     local protocol="ipv4"
     local raw=false
-    local virsh_uri="qemu:///system"
+    local virsh_uri="${LIBVIRT_URI:-qemu:///system}"
 
     # Parse named arguments
     while [[ $# -gt 0 ]]; do

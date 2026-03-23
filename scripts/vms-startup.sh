@@ -110,13 +110,13 @@ step_07_start_vms() {
 }
 
 step_08_wait_for_talos() {
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    MASTER_IP="$MASTER_IP" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    VERBOSE="$VERBOSE" \
+    export NETWORK_NAME="$NETWORK_NAME"
+    export MASTER_NAME="$MASTER_NAME"
+    export MASTER_IP="$MASTER_IP"
+    export WORKER_COUNT="$WORKER_COUNT"
+    export WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX"
+    export LIBVIRT_URI="$LIBVIRT_URI"
+    export VERBOSE="$VERBOSE"
     bash "$STEPS_DIR/08-wait-for-talos.sh"
 }
 

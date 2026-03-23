@@ -36,7 +36,7 @@ echo ""
 
 # Initial network check
 if [[ "$VERBOSE" == "true" ]]; then
-    echo "  > Getting DHCP leases for network: $NETWORK_NAME"
+    echo "  > Getting DHCP leases for network: $NETWORK_NAME in $LIBVIRT_URI"
     virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null || echo "  > No leases found"
     echo ""
 fi
@@ -51,6 +51,8 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
     # Get all IPs from libvirt network
     if [[ "$VERBOSE" == "true" ]]; then
         echo "  > Querying DHCP leases..."
+        echo "  > NETWORK_NAME=$NETWORK_NAME"
+        echo "  > LIBVIRT_URI=$LIBVIRT_URI"
     fi
     mapfile -t VM_IPS < <(libvirt_get_dhcp_ips -n "$NETWORK_NAME" -p ipv4 -r)
     TOTAL_COUNT=${#VM_IPS[@]}
