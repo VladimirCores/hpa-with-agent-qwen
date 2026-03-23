@@ -268,6 +268,22 @@ echo "  Waiting for Talos API to be accessible..."
 echo "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
 
+# Function to check if Talos API is accessible
+check_talos_api() {
+    local ip="$1"
+    # Try talosctl with timeout
+    timeout 3 talosctl get version --nodes "$ip" --insecure &>/dev/null
+    return $?
+}
+
+# Function to check if port 50000 is open
+check_port_50000() {
+    local ip="$1"
+    # Try connecting to Talos API port (50000)
+    timeout 2 bash -c "echo > /dev/tcp/$ip/50000" 2>/dev/null
+    return $?
+}
+
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
     echo "  [${BOOT_ELAPSED}s] Checking VM status..."
 
@@ -293,12 +309,16 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
             done
 
             if [[ -n "$VM_IP" ]]; then
-                if talosctl get version --nodes "$VM_IP" --insecure &>/dev/null; then
+                # Check Talos API accessibility
+                if check_talos_api "$VM_IP"; then
                     echo "    ✓ $ACTUAL_VM ($VM_IP) - Talos API ready"
                     READY_COUNT=$((READY_COUNT + 1))
                     continue
+                # Fallback: Check if port 50000 is open
+                elif check_port_50000 "$VM_IP"; then
+                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Port 50000 open, API starting (state: $VM_STATE)"
                 else
-                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - IP assigned, Talos API not ready (state: $VM_STATE)"
+                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - Waiting for port 50000 (state: $VM_STATE)"
                 fi
             else
                 echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
@@ -325,6 +345,8 @@ done
 if [[ "$ALL_READY" != "true" ]]; then
     echo "  WARNING: Not all VMs ready after ${BOOT_WAIT}s"
     echo "  Check VM console logs: virsh -c qemu:///system console <vm-name>"
+    echo ""
+    echo "  Continuing anyway (VMs may need more time)..."
 fi
 
 echo ""
