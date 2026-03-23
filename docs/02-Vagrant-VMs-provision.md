@@ -167,8 +167,9 @@ Reports success/failure for each step
 **Script structure**:
 
 ```
-scripts/vms-startup.sh          # Main script (50 lines)
+scripts/vms-startup.sh          # Main script (75 lines)
 scripts/vms-startup/
+├── 00-setup.sh                 # Common setup (sources .env)
 ├── 00-helper-functions.sh      # Common functions
 ├── 01-authenticate-sudo.sh     # Step 1: Sudo auth
 ├── 02-check-prerequisites.sh   # Step 2: Prerequisites
@@ -181,6 +182,18 @@ scripts/vms-startup/
 ├── 09-eject-iso.sh             # Step 9: Eject ISO
 ├── 10-reboot-verify.sh         # Step 10: Reboot & verify
 └── 11-summary.sh               # Step 11: Summary
+```
+
+**Independent .env sourcing**:
+
+Each step script sources `.env` independently via `00-setup.sh`:
+
+```bash
+# Each step can run standalone with correct environment
+NETWORK_NAME=cluster-talos-net bash scripts/vms-startup/02-check-prerequisites.sh
+
+# Or async steps share no state - each loads its own .env
+bash scripts/vms-startup/08-wait-for-talos.sh &
 ```
 
 **Key improvements**:
