@@ -3,8 +3,6 @@
 
 # Load environment variables from .env file
 def load_env
-  # Load environment variables from .env file
-  # This enables static IP configuration via the .env file
   env_file = File.join(File.dirname(__FILE__), '.env')
   if File.exist?(env_file)
     File.read(env_file).each_line do |line|
@@ -17,30 +15,29 @@ end
 load_env
 
 # Talos Disk Image Configuration
-TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/latest/download/metal-amd64.iso"
+TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/v1.11.5/metal-amd64.iso"
 TALOS_IMAGE_PATH = ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso"
 
 # MAC Address Configuration
 MAC_PREFIX = ENV['MAC_PREFIX'] || "52:54:00:00:00"
 
-# Ensure Talos image exists (host-level operation)
+# Ensure Talos image exists
 unless File.exist?(TALOS_IMAGE_PATH)
-  puts "Downloading Talos Linux Raw Image..."
-  # Try curl first, fallback to wget
+  puts "Downloading Talos Linux ISO..."
   system("curl -L -o #{TALOS_IMAGE_PATH} #{TALOS_IMAGE_URL}") || system("wget -O #{TALOS_IMAGE_PATH} #{TALOS_IMAGE_URL}")
   unless File.exist?(TALOS_IMAGE_PATH)
-    puts "Failed to download Talos image. Please check your internet connection and try again."
+    puts "Failed to download Talos ISO."
     exit 1
   end
-  puts "Talos image download complete."
+  puts "Talos ISO download complete."
 end
 
-# Function to configure a Talos VM (eliminates duplication)
+# Function to configure a Talos VM
 def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
   config.vm.define name do |vm|
     vm.vm.hostname = name
 
-    # Private network (shared across all VMs) - ONLY network interface
+    # Network with static DHCP reservation
     vm.vm.network :private_network,
                   type: 'dhcp',
                   mac: mac_address,
@@ -52,13 +49,15 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address)
       domain.driver = "qemu"
       domain.memory = memory_mb
       domain.cpus = cpus
-      # Boot from Talos image
+
+      # Boot from disk (Talos installed) with ISO as fallback for first boot
       domain.storage :file,
                      device: :cdrom,
                      path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
-      domain.boot 'cdrom'
-      domain.boot 'hd'
-      # Persistent disk - stored in libvirt pool, preserved by using 'halt' not 'destroy'
+      domain.boot 'hd'  # Try disk first
+      domain.boot 'cdrom'  # Fallback to ISO
+
+      # Persistent disk
       domain.storage :file, size: '5G', bus: 'virtio', cache: 'none'
     end
   end
