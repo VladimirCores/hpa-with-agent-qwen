@@ -12,8 +12,7 @@ source "$STEP_DIR/00-setup.sh"
 
 # Ensure helper functions are loaded
 if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
-    STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/00-helper-functions.sh"
+    source "$STEP_DIR/00-helper-functions.sh"
 fi
 
 # Configuration
