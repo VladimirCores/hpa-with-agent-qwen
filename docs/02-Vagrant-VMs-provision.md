@@ -168,10 +168,24 @@ scripts/vms-startup/
 
 **Key improvements**:
 
-- Steps 08-10 use `get_libvirt_ips()` to get IPs directly
+- Steps 08-10 use `libvirt_get_dhcp_ips()` with named parameters
+- Intuitive function signature: `libvirt_get_dhcp_ips -n <network> -p <protocol>`
 - No complex VM name ↔ IP matching logic
 - Faster execution (fewer virsh calls)
 - Simpler, more maintainable code
+
+**Helper function usage**:
+
+```bash
+# Get all IPv4 addresses from network
+mapfile -t IPS < <(libvirt_get_dhcp_ips -n cluster-talos-net -p ipv4)
+
+# Get all IPs (IPv4 + IPv6)
+mapfile -t IPS < <(libvirt_get_dhcp_ips -n my-network -p all)
+
+# Show help
+libvirt_get_dhcp_ips --help
+```
 
 ### vms-cleanup.sh
 
