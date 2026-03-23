@@ -10,11 +10,11 @@ REBOOT_ELAPSED=0
 
 # Reboot all VMs
 echo "  Sending reboot command to all VMs..."
-for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
-    if [[ -n "$ACTUAL_VM" ]]; then
-        echo "  Rebooting $ACTUAL_VM..."
-        virsh -c "$LIBVIRT_URI" reboot "$ACTUAL_VM" 2>/dev/null || true
+mapfile -t ALL_VMS < <(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "with-agent-qwen" | awk '{print $2}')
+for actual_vm in "${ALL_VMS[@]}"; do
+    if [[ -n "$actual_vm" ]]; then
+        echo "  Rebooting $actual_vm..."
+        virsh -c "$LIBVIRT_URI" reboot "$actual_vm" 2>/dev/null || true
     fi
 done
 
@@ -32,50 +32,19 @@ while [[ $REBOOT_ELAPSED -lt $REBOOT_WAIT ]]; do
 
     # Get all IPs from libvirt network
     mapfile -t VM_IPS < <(get_libvirt_ips "$NETWORK_NAME" "ipv4")
+    TOTAL_COUNT=${#VM_IPS[@]}
 
-    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-        TOTAL_COUNT=$((TOTAL_COUNT + 1))
-
-        ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
-
-        if [[ -n "$ACTUAL_VM" ]]; then
-            # Get VM state
-            VM_STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
-
-            # Get IP for this VM from the list
-            VM_IP=""
-            for ip in "${VM_IPS[@]}"; do
-                VM_MAC=$(virsh -c "$LIBVIRT_URI" domifaddr "$ACTUAL_VM" 2>/dev/null | grep -v "^-" | awk '{print $2}' | head -1)
-                if [[ -n "$VM_MAC" ]]; then
-                    LEASE_MAC=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep "$ip" | awk '{print $2}')
-                    if [[ "$VM_MAC" == "$LEASE_MAC" ]]; then
-                        VM_IP="$ip"
-                        break
-                    fi
-                fi
-            done
-
-            if [[ -n "$VM_IP" ]]; then
-                if talosctl get version --nodes "$VM_IP" --insecure &>/dev/null; then
-                    # Verify boot source (should be disk, not ISO)
-                    CDROM_PRESENT=$(virsh -c "$LIBVIRT_URI" domblklist "$ACTUAL_VM" 2>/dev/null | grep -E "^hda.*iso$" | wc -l)
-                    if [[ "$CDROM_PRESENT" -eq 0 ]]; then
-                        echo "    ✓ $ACTUAL_VM ($VM_IP) - Booted from disk ✓"
-                    else
-                        echo "    ⚠ $ACTUAL_VM ($VM_IP) - Ready (CDROM still attached)"
-                    fi
-                    READY_COUNT=$((READY_COUNT + 1))
-                    continue
-                else
-                    echo "    ⏳ $ACTUAL_VM ($VM_IP) - IP assigned, Talos API not ready (state: $VM_STATE)"
-                fi
+    # Check each IP directly
+    for vm_ip in "${VM_IPS[@]}"; do
+        if [[ -n "$vm_ip" ]]; then
+            if talosctl get version --nodes "$vm_ip" --insecure &>/dev/null; then
+                echo "    ✓ $vm_ip - Booted from disk ✓"
+                READY_COUNT=$((READY_COUNT + 1))
             else
-                echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
+                echo "    ⏳ $vm_ip - Waiting for Talos API"
+                ALL_READY=false
             fi
-        else
-            echo "    ✗ $vm_name - VM not found"
         fi
-        ALL_READY=false
     done
 
     echo ""

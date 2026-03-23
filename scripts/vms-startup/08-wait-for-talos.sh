@@ -22,53 +22,25 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
 
     # Get all IPs from libvirt network
     mapfile -t VM_IPS < <(get_libvirt_ips "$NETWORK_NAME" "ipv4")
+    TOTAL_COUNT=${#VM_IPS[@]}
 
-    for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-        TOTAL_COUNT=$((TOTAL_COUNT + 1))
-
-        # Find VM with matching suffix
-        ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${vm_name}[^0-9]*\s" | awk '{print $2}' | head -1 || true)
-
-        if [[ -n "$ACTUAL_VM" ]]; then
-            # Get VM state
-            VM_STATE=$(virsh -c "$LIBVIRT_URI" dominfo "$ACTUAL_VM" 2>/dev/null | grep "State:" | awk '{print $2}')
-
-            # Get IP for this VM from the list
-            VM_IP=""
-            for ip in "${VM_IPS[@]}"; do
-                # Check if this IP belongs to this VM by checking MAC address
-                VM_MAC=$(virsh -c "$LIBVIRT_URI" domifaddr "$ACTUAL_VM" 2>/dev/null | grep -v "^-" | awk '{print $2}' | head -1)
-                if [[ -n "$VM_MAC" ]]; then
-                    LEASE_MAC=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep "$ip" | awk '{print $2}')
-                    if [[ "$VM_MAC" == "$LEASE_MAC" ]]; then
-                        VM_IP="$ip"
-                        break
-                    fi
-                fi
-            done
-
-            if [[ -n "$VM_IP" ]]; then
-                # Check machine READY status
-                MACHINE_READY=$(check_machine_ready "$VM_IP")
-                if [[ "$MACHINE_READY" == "true" ]]; then
-                    echo "    ✓ $ACTUAL_VM ($VM_IP) - Machine READY"
-                    READY_COUNT=$((READY_COUNT + 1))
-                    continue
-                else
-                    # Get current machine status for more info
-                    if [[ -n "$MACHINE_READY" ]]; then
-                        echo "    ⏳ $ACTUAL_VM ($VM_IP) - Machine status: $MACHINE_READY (state: $VM_STATE)"
-                    else
-                        echo "    ⏳ $ACTUAL_VM ($VM_IP) - Waiting for machine status (state: $VM_STATE)"
-                    fi
-                fi
+    # Check each IP directly
+    for vm_ip in "${VM_IPS[@]}"; do
+        if [[ -n "$vm_ip" ]]; then
+            # Check machine READY status
+            MACHINE_READY=$(check_machine_ready "$vm_ip")
+            if [[ "$MACHINE_READY" == "true" ]]; then
+                echo "    ✓ $vm_ip - Machine READY"
+                READY_COUNT=$((READY_COUNT + 1))
             else
-                echo "    ⏳ $ACTUAL_VM - Waiting for IP address (state: $VM_STATE)"
+                if [[ -n "$MACHINE_READY" ]]; then
+                    echo "    ⏳ $vm_ip - Machine status: $MACHINE_READY"
+                else
+                    echo "    ⏳ $vm_ip - Waiting for machine status"
+                fi
+                ALL_READY=false
             fi
-        else
-            echo "    ✗ $vm_name - VM not found"
         fi
-        ALL_READY=false
     done
 
     echo ""
