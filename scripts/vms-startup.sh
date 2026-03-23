@@ -273,11 +273,12 @@ check_machine_ready() {
     local ip="$1"
     # Get machine status and check for READY state
     local status
-    status=$(timeout 3 talosctl -n "$ip" get machinestatus --insecure 2>/dev/null | grep "READY" | awk '{print $2}')
+    status=$(timeout 3 talosctl -n "$ip" get machinestatus --insecure 2>/dev/null | grep "READY" | awk '{print $2}' || echo "")
     if [[ "$status" == "true" ]]; then
-        return 0
+        echo "true"
+    else
+        echo "false"
     fi
-    return 1
 }
 
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
@@ -306,15 +307,15 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
 
             if [[ -n "$VM_IP" ]]; then
                 # Check machine READY status
-                if check_machine_ready "$VM_IP"; then
+                MACHINE_READY=$(check_machine_ready "$VM_IP")
+                if [[ "$MACHINE_READY" == "true" ]]; then
                     echo "    ✓ $ACTUAL_VM ($VM_IP) - Machine READY"
                     READY_COUNT=$((READY_COUNT + 1))
                     continue
                 else
                     # Get current machine status for more info
-                    MACHINE_STATUS=$(timeout 2 talosctl -n "$VM_IP" get machinestatus --insecure 2>/dev/null | grep "READY" | awk '{print $2}')
-                    if [[ -n "$MACHINE_STATUS" ]]; then
-                        echo "    ⏳ $ACTUAL_VM ($VM_IP) - Machine status: $MACHINE_STATUS (state: $VM_STATE)"
+                    if [[ -n "$MACHINE_READY" ]]; then
+                        echo "    ⏳ $ACTUAL_VM ($VM_IP) - Machine status: $MACHINE_READY (state: $VM_STATE)"
                     else
                         echo "    ⏳ $ACTUAL_VM ($VM_IP) - Waiting for machine status (state: $VM_STATE)"
                     fi
