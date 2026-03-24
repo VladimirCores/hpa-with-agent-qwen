@@ -14,8 +14,14 @@ ISO_VOLUME_NAME="talos-metal-amd64.iso"
 # Check if storage pool exists, create if needed
 if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
     echo "  Storage pool '$STORAGE_POOL' not found. Creating..."
-    POOL_PATH="/var/lib/libvirt/$STORAGE_POOL"
+    
+    # Use POOL_PATH from .env or default to /var/lib/libvirt/$STORAGE_POOL
+    POOL_PATH="${POOL_PATH:-/var/lib/libvirt/$STORAGE_POOL}"
+    # Expand ~ to home directory if needed
+    POOL_PATH="${POOL_PATH/#\~/$HOME}"
+    
     sudo mkdir -p "$POOL_PATH"
+    sudo chown qemu:kvm "$POOL_PATH"
     sudo chmod 755 "$POOL_PATH"
 
     cat <<EOF | virsh -c "$LIBVIRT_URI" pool-define /dev/stdin

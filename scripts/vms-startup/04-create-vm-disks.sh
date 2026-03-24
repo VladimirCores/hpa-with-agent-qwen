@@ -29,10 +29,38 @@ if [[ -f "${TALOS_RAW_IMAGE_PATH%.raw}.qcow2" ]]; then
     echo "  Using qcow2 base image: $BASE_IMAGE"
 fi
 
-# Ensure storage pool exists
+# Ensure storage pool exists, create if needed
 if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
-    echo "ERROR: Storage pool not found: $STORAGE_POOL"
-    exit 1
+    echo "  Storage pool '$STORAGE_POOL' not found. Creating..."
+    
+    # Use POOL_PATH from .env or default to /var/lib/libvirt/$STORAGE_POOL
+    POOL_PATH="${POOL_PATH:-/var/lib/libvirt/$STORAGE_POOL}"
+    # Expand ~ to home directory if needed
+    POOL_PATH="${POOL_PATH/#\~/$HOME}"
+    
+    # Create pool directory
+    sudo mkdir -p "$POOL_PATH"
+    sudo chown qemu:kvm "$POOL_PATH"
+    sudo chmod 755 "$POOL_PATH"
+    
+    # Create pool XML
+    POOL_XML=$(cat <<EOF
+<pool type='dir'>
+  <name>$STORAGE_POOL</name>
+  <target>
+    <path>$POOL_PATH</path>
+  </target>
+</pool>
+EOF
+)
+    
+    # Define and start the pool
+    echo "$POOL_XML" | virsh -c "$LIBVIRT_URI" pool-define /dev/stdin
+    virsh -c "$LIBVIRT_URI" pool-start "$STORAGE_POOL"
+    virsh -c "$LIBVIRT_URI" pool-autostart "$STORAGE_POOL"
+    echo "  ✓ Storage pool created"
+else
+    echo "  ✓ Storage pool '$STORAGE_POOL' exists"
 fi
 
 # Get pool path
