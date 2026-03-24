@@ -57,69 +57,110 @@ echo "    - controlplane.yaml"
 echo "    - worker.yaml"
 echo "    - talosconfig"
 
-# Extract certificates for reference
+# Extract certificates for reference using bash only
 echo ""
 echo "  Extracting certificates..."
 
-python3 << 'PYTHON_EXTRACT'
-import yaml
-import base64
-import os
+# Function to extract and decode base64 certificate from YAML
+extract_cert() {
+    local file="$1"
+    local key_path="$2"
+    local output="$3"
+    
+    # Use grep and awk to extract base64 value from YAML
+    # This handles simple nested key paths like machine.ca.crt
+    local base64_value
+    base64_value=$(grep -A1 "${key_path}:" "$file" | tail -1 | awk '{print $1}' | tr -d '"')
+    
+    if [[ -n "$base64_value" ]]; then
+        echo "$base64_value" | base64 -d > "$output" 2>/dev/null
+        return $?
+    fi
+    return 1
+}
 
-config_dir = os.environ.get('CONFIG_DIR', 'talos-cluster')
-certs_dir = os.environ.get('CERTS_DIR', 'talos-cluster/certs')
-
-os.makedirs(certs_dir, exist_ok=True)
-
-try:
-    # Read controlplane.yaml (first document)
-    with open(f"{config_dir}/controlplane.yaml", 'r') as f:
-        docs = list(yaml.safe_load_all(f))
-        config = docs[0]
-
+# Function to extract cert/key pair from multi-document YAML
+extract_certs_from_yaml() {
+    local input_file="$1"
+    local certs_dir="$2"
+    
+    # Split multi-document YAML and process first document (machine config)
+    local temp_file
+    temp_file=$(mktemp)
+    
+    # Extract first document only (before ---)
+    awk '/^---/{if(n)exit; n=1; next} n' "$input_file" > "$temp_file"
+    
     # Extract machine CA
-    ca_crt = config['machine']['ca']['crt']
-    ca_key = config['machine']['ca']['key']
-    with open(f"{certs_dir}/ca.crt", 'w') as f:
-        f.write(base64.b64decode(ca_crt).decode('utf-8'))
-    with open(f"{certs_dir}/ca.key", 'w') as f:
-        f.write(base64.b64decode(ca_key).decode('utf-8'))
+    if grep -q "machine:" "$temp_file"; then
+        # Extract ca.crt for machine
+        local in_ca=false
+        local ca_crt="" ca_key=""
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^[[:space:]]*ca: ]]; then
+                in_ca=true
+            elif $in_ca; then
+                if [[ "$line" =~ ^[[:space:]]*crt:[[:space:]]*(.+) ]]; then
+                    ca_crt="${BASH_REMATCH[1]}"
+                elif [[ "$line" =~ ^[[:space:]]*key:[[:space:]]*(.+) ]]; then
+                    ca_key="${BASH_REMATCH[1]}"
+                elif [[ ! "$line" =~ ^[[:space:]] ]]; then
+                    in_ca=false
+                fi
+            fi
+        done < "$temp_file"
+        
+        if [[ -n "$ca_crt" ]]; then
+            echo "$ca_crt" | base64 -d > "$certs_dir/ca.crt" 2>/dev/null && \
+                echo "    ✓ ca.crt extracted"
+        fi
+        if [[ -n "$ca_key" ]]; then
+            echo "$ca_key" | base64 -d > "$certs_dir/ca.key" 2>/dev/null && \
+                echo "    ✓ ca.key extracted"
+        fi
+    fi
+    
+    # Extract cluster CA (Kubernetes CA)
+    if grep -q "cluster:" "$temp_file"; then
+        local in_cluster=false in_ca=false
+        local k8s_crt="" k8s_key=""
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^[[:space:]]*cluster: ]]; then
+                in_cluster=true
+            elif $in_cluster; then
+                if [[ "$line" =~ ^[[:space:]]*ca: ]]; then
+                    in_ca=true
+                elif $in_ca; then
+                    if [[ "$line" =~ ^[[:space:]]*crt:[[:space:]]*(.+) ]]; then
+                        k8s_crt="${BASH_REMATCH[1]}"
+                    elif [[ "$line" =~ ^[[:space:]]*key:[[:space:]]*(.+) ]]; then
+                        k8s_key="${BASH_REMATCH[1]}"
+                    elif [[ "$line" =~ ^[[:space:]]*[a-z]+: && ! "$line" =~ ^[[:space:]]*(crt|key|ca): ]]; then
+                        in_ca=false
+                    fi
+                fi
+            fi
+        done < "$temp_file"
+        
+        if [[ -n "$k8s_crt" ]]; then
+            echo "$k8s_crt" | base64 -d > "$certs_dir/k8s-ca.crt" 2>/dev/null && \
+                echo "    ✓ k8s-ca.crt extracted"
+        fi
+        if [[ -n "$k8s_key" ]]; then
+            echo "$k8s_key" | base64 -d > "$certs_dir/k8s-ca.key" 2>/dev/null && \
+                echo "    ✓ k8s-ca.key extracted"
+        fi
+    fi
+    
+    rm -f "$temp_file"
+}
 
-    # Extract Kubernetes CA
-    k8s_ca_crt = config['cluster']['ca']['crt']
-    k8s_ca_key = config['cluster']['ca']['key']
-    with open(f"{certs_dir}/k8s-ca.crt", 'w') as f:
-        f.write(base64.b64decode(k8s_ca_crt).decode('utf-8'))
-    with open(f"{certs_dir}/k8s-ca.key", 'w') as f:
-        f.write(base64.b64decode(k8s_ca_key).decode('utf-8'))
+# Extract certificates
+extract_certs_from_yaml "$CONFIG_DIR/controlplane.yaml" "$CERTS_DIR"
 
-    # Extract aggregatorCA cert (front-proxy)
-    agg_crt = config['cluster']['aggregatorCA']['crt']
-    agg_key = config['cluster']['aggregatorCA']['key']
-    with open(f"{certs_dir}/aggregator-ca.crt", 'w') as f:
-        f.write(base64.b64decode(agg_crt).decode('utf-8'))
-    with open(f"{certs_dir}/aggregator-ca.key", 'w') as f:
-        f.write(base64.b64decode(agg_key).decode('utf-8'))
-
-    # Extract etcd CA cert
-    etcd_crt = config['cluster']['etcd']['ca']['crt']
-    etcd_key = config['cluster']['etcd']['ca']['key']
-    with open(f"{certs_dir}/etcd-ca.crt", 'w') as f:
-        f.write(base64.b64decode(etcd_crt).decode('utf-8'))
-    with open(f"{certs_dir}/etcd-ca.key", 'w') as f:
-        f.write(base64.b64decode(etcd_key).decode('utf-8'))
-
-    # Extract service account key
-    sa_key = config['cluster']['serviceAccount']['key']
-    with open(f"{certs_dir}/sa.key", 'w') as f:
-        f.write(base64.b64decode(sa_key).decode('utf-8'))
-
-    # Count and report
-    cert_files = [f for f in os.listdir(certs_dir) if f.endswith('.crt') or f.endswith('.key')]
-    print(f"  Extracted {len(cert_files)} certificate files")
-except Exception as e:
-    print(f"  WARNING: Could not extract certificates: {e}")
-PYTHON_EXTRACT
+# Count extracted files
+cert_count=$(ls -1 "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key 2>/dev/null | wc -l)
+echo "  Extracted $cert_count certificate files"
 
 echo ""
 echo "  Certificate files:"
