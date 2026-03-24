@@ -4,6 +4,7 @@
 # =============================================================================
 # This script starts all Talos cluster VMs with proper cleanup and verification.
 # All steps run synchronously, waiting for each to complete before continuing.
+# Supports both ISO-based installation and raw disk image provisioning.
 # =============================================================================
 
 set -euo pipefail
@@ -27,6 +28,7 @@ fi
 export NETWORK_NAME MASTER_NAME MASTER_IP WORKER_COUNT
 export WORKER_NAME_PREFIX WORKER_IP_BASE STORAGE_POOL LIBVIRT_URI
 export SKIP_CLEANUP FORCE_RESET VERBOSE CLUSTER_NAME TALOS_IMAGE_URL TALOS_IMAGE_PATH
+export USE_RAW_IMAGE TALOS_RAW_IMAGE_PATH TALOS_RAW_IMAGE_COMPRESSED
 export SUDO_USER
 
 # Parse arguments
@@ -53,6 +55,7 @@ echo "Configuration:"
 echo "  NETWORK_NAME: $NETWORK_NAME"
 echo "  MASTER_NAME: $MASTER_NAME ($MASTER_IP)"
 echo "  WORKER_COUNT: $WORKER_COUNT"
+echo "  USE_RAW_IMAGE: ${USE_RAW_IMAGE:-false}"
 echo "  SKIP_CLEANUP: $SKIP_CLEANUP"
 echo "  FORCE_RESET: $FORCE_RESET"
 echo "  VERBOSE: $VERBOSE"
@@ -78,17 +81,30 @@ step_02_check_prerequisites() {
     bash "$STEPS_DIR/02-check-prerequisites.sh"
 }
 
-step_03_prepare_iso() {
-    TALOS_IMAGE_URL="$TALOS_IMAGE_URL" \
-    TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
-    bash "$STEPS_DIR/03-prepare-iso.sh"
+step_03_prepare_image() {
+    if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+        TALOS_RAW_IMAGE_URL="$TALOS_RAW_IMAGE_URL" \
+        TALOS_RAW_IMAGE_PATH="$TALOS_RAW_IMAGE_PATH" \
+        TALOS_RAW_IMAGE_COMPRESSED="$TALOS_RAW_IMAGE_COMPRESSED" \
+        bash "$STEPS_DIR/03-prepare-raw-image.sh"
+    else
+        TALOS_IMAGE_URL="$TALOS_IMAGE_URL" \
+        TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
+        bash "$STEPS_DIR/03-prepare-iso.sh"
+    fi
 }
 
-step_04_copy_iso_to_pool() {
-    STORAGE_POOL="$STORAGE_POOL" \
-    TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/04-copy-iso-to-pool.sh"
+step_04_prepare_storage() {
+    if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+        FORCE_RESET="$FORCE_RESET" \
+        PROJECT_ROOT="$PROJECT_ROOT" \
+        bash "$STEPS_DIR/04-create-vm-disks.sh"
+    else
+        STORAGE_POOL="$STORAGE_POOL" \
+        TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
+        LIBVIRT_URI="$LIBVIRT_URI" \
+        bash "$STEPS_DIR/04-copy-iso-to-pool.sh"
+    fi
 }
 
 step_05_setup_network() {
@@ -105,6 +121,8 @@ step_06_cleanup_vms() {
     WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
     STORAGE_POOL="$STORAGE_POOL" \
     LIBVIRT_URI="$LIBVIRT_URI" \
+    USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
+    PROJECT_ROOT="$PROJECT_ROOT" \
     bash "$STEPS_DIR/06-cleanup-vms.sh"
 }
 
@@ -120,32 +138,24 @@ step_08_wait_for_talos() {
     source "$STEPS_DIR/08-wait-for-talos.sh"
 }
 
-step_09_eject_iso() {
+step_09_reboot_verify() {
     NETWORK_NAME="$NETWORK_NAME" \
     MASTER_NAME="$MASTER_NAME" \
     WORKER_COUNT="$WORKER_COUNT" \
     WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
     LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/09-eject-iso.sh"
+    bash "$STEPS_DIR/09-reboot-verify.sh"
 }
 
-step_10_reboot_verify() {
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/10-reboot-verify.sh"
-}
-
-step_11_summary() {
+step_10_summary() {
     NETWORK_NAME="$NETWORK_NAME" \
     MASTER_NAME="$MASTER_NAME" \
     MASTER_IP="$MASTER_IP" \
     WORKER_COUNT="$WORKER_COUNT" \
     WORKER_IP_BASE="$WORKER_IP_BASE" \
     CLUSTER_NAME="${CLUSTER_NAME:-talos-cluster}" \
-    bash "$STEPS_DIR/11-summary.sh"
+    USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
+    bash "$STEPS_DIR/10-summary.sh"
 }
 
 # Execute steps
@@ -171,11 +181,11 @@ run_step_sync() {
 # Steps 01-07: Run synchronously
 run_step_sync "01: Authenticate sudo" "step_01_authenticate_sudo"
 run_step_sync "02: Check prerequisites" "step_02_check_prerequisites"
-run_step_sync "03: Prepare ISO" "step_03_prepare_iso"
-run_step_sync "04: Copy ISO to pool" "step_04_copy_iso_to_pool"
-run_step_sync "05: Setup network" "step_05_setup_network"
-run_step_sync "06: Cleanup VMs" "step_06_cleanup_vms"
-run_step_sync "07: Start VMs" "step_07_start_vms"
+run_step_sync "03: Prepare disk image" "step_03_prepare_image"
+run_step_sync "04: Setup network" "step_05_setup_network"
+run_step_sync "05: Cleanup VMs" "step_06_cleanup_vms"
+run_step_sync "06: Start VMs" "step_07_start_vms"
+run_step_sync "07: Create CoW overlays" "step_04_prepare_storage"
 
 # Step 08: Source directly (preserves sudo context for virsh)
 echo "Starting: 08: Wait for Talos boot"
@@ -183,9 +193,8 @@ step_08_wait_for_talos
 echo "  ✓ Completed"
 echo ""
 
-# Steps 09-11: Run synchronously
-run_step_sync "09: Eject ISO" "step_09_eject_iso"
-run_step_sync "10: Reboot and verify" "step_10_reboot_verify"
-run_step_sync "11: Summary" "step_11_summary"
+# Steps 09-10: Run synchronously
+run_step_sync "09: Reboot and verify" "step_09_reboot_verify"
+run_step_sync "10: Summary" "step_10_summary"
 
 echo "=== VM Startup Complete ==="

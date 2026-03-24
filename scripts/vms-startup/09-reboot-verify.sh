@@ -1,6 +1,6 @@
 #!/bin/bash
-# Step 10: Reboot VMs and verify disk boot
-# Reboots all VMs and verifies they boot from disk (not ISO)
+# Step 09: Reboot VMs and verify disk boot
+# Reboots all VMs and verifies they boot from disk
 
 # Source common setup
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +11,13 @@ if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
     source "$STEP_DIR/00-helper-functions.sh"
 fi
 
-echo "[10/11] Rebooting VMs to verify disk boot..."
+if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+    echo "[9/10] Rebooting VMs to verify disk boot..."
+    echo "  (Raw image mode - VMs boot from pre-installed disk)"
+else
+    echo "[9/10] Rebooting VMs to verify disk boot..."
+    echo "  (ISO mode - VMs reboot after installation)"
+fi
 
 REBOOT_WAIT=300  # 5 minutes max
 REBOOT_INTERVAL=5

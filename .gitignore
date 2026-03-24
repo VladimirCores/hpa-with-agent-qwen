@@ -1,6 +1,7 @@
 # Ignore ISO files
 *.iso
 *.raw*
+*.qcow2
 iso/
 
 # Ignore Vagrant files
@@ -12,3 +13,6 @@ talos-cluster/
 
 # Ignore sudo cache files
 .sudo_cache*
+
+# Ignore Qwen Code settings
+.qwen/

@@ -7,11 +7,28 @@ STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STEP_DIR/00-setup.sh"
 
 if [[ "$SKIP_CLEANUP" == "false" ]]; then
-    echo "[6/11] Cleaning up existing VMs and disks..."
+    echo "[6/10] Cleaning up existing VMs and disks..."
 
-    # Remove disk volumes first (ensures fresh install)
-    echo "  Removing disk volumes..."
-    for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | awk '{print $1}' | grep -v "\.iso$"); do
+    # Clean up raw image overlays from storage pool (if using raw image mode)
+    if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+        echo "  Cleaning raw image overlays from storage pool..."
+        # Remove overlay volumes (keep base image)
+        for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | awk '{print $1}' | grep -v "talos-base-image"); do
+            echo "    Removing: $vol"
+            virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null || true
+        done
+        echo "  ✓ Raw image overlays removed from pool"
+        
+        # Also clean local overlay directory if exists
+        OVERLAY_DIR="$PROJECT_ROOT/.vagrant/raw-disks"
+        if [[ -d "$OVERLAY_DIR" ]]; then
+            rm -f "$OVERLAY_DIR"/*.qcow2 2>/dev/null || true
+        fi
+    fi
+
+    # Remove other disk volumes from storage pool (ISO mode)
+    echo "  Removing other storage pool volumes..."
+    for vol in $(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | awk '{print $1}' | grep -v "\.iso$" | grep -v "talos-base-image"); do
         echo "    Removing: $vol"
         virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null || true
     done
@@ -35,8 +52,12 @@ if [[ "$SKIP_CLEANUP" == "false" ]]; then
         fi
     done
 
-    echo "  ✓ Cleanup complete (disks wiped for fresh Talos install)"
+    if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+        echo "  ✓ Cleanup complete (overlays wiped for fresh Talos boot)"
+    else
+        echo "  ✓ Cleanup complete (disks wiped for fresh Talos install)"
+    fi
 else
-    echo "[6/11] Skipping cleanup (using -s flag)"
+    echo "[6/10] Skipping cleanup (using -s flag)"
 fi
 echo ""

@@ -140,6 +140,21 @@ echo "[4/7] Cleaning up storage volumes..."
 
 STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
 
+# Clean up raw image overlays (if using raw image mode)
+if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+    OVERLAY_DIR="$PROJECT_ROOT/.vagrant/raw-disks"
+    if [[ -d "$OVERLAY_DIR" ]]; then
+        echo "  Removing raw image overlays..."
+        for overlay in "$OVERLAY_DIR"/*.qcow2; do
+            if [[ -f "$overlay" ]]; then
+                echo "    Removing: $(basename "$overlay")"
+                rm -f "$overlay"
+            fi
+        done
+        echo "  ✓ Raw image overlays removed"
+    fi
+fi
+
 # Remove ALL volumes from talos-pool (ISO and VM disks)
 echo "  Removing all volumes from $STORAGE_POOL..."
 virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | while read -r vol rest; do
@@ -207,6 +222,9 @@ echo "[7/7] Cleanup Summary"
 echo "==================="
 echo "VMs: Stopped and undefined"
 echo "Volumes: Cleaned"
+if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+    echo "Raw Image Overlays: Cleaned"
+fi
 if [[ "$DESTROY_NETWORK" == "true" ]]; then
     echo "Network: Destroyed"
 else
@@ -217,6 +235,11 @@ echo ""
 echo "To restart the cluster:"
 echo "  ./scripts/vms-startup.sh"
 echo ""
-echo "Note: Storage pool was removed. It will be recreated on next startup."
+if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+    echo "Note: Raw image overlays will be recreated on next startup."
+    echo "      Base image preserved: $TALOS_RAW_IMAGE_PATH"
+else
+    echo "Note: Storage pool was removed. It will be recreated on next startup."
+fi
 echo ""
 echo "=== Cleanup Complete ==="

@@ -13,7 +13,7 @@ The Vagrant configuration creates a Talos cluster with one master node and confi
 | Provider   | libvirt (QEMU/KVM)                    |
 | Network    | Isolated NAT network with static DHCP |
 | Storage    | Directory-based storage pool          |
-| Boot Media | Talos ISO (downloaded automatically)  |
+| Boot Media | Raw disk image or ISO (configurable)  |
 
 ### Default VM Configuration
 
@@ -24,6 +24,16 @@ The Vagrant configuration creates a Talos cluster with one master node and confi
 | talos-worker-2 | 1    | 2048MB | -    | 10.0.0.12  | `${MAC_PREFIX}:0c` |
 
 > **Note:** MAC addresses use the `MAC_PREFIX` from `.env` (default: `52:54:00:00:00`).
+
+### Provisioning Modes
+
+| Mode | Description | Speed | Use Case |
+|------|-------------|-------|----------|
+| **Raw Image** (default) | Uses pre-built `metal-amd64.raw.zst` disk image | ~2-3 min | Development, testing |
+| **ISO Install** | Traditional ISO-based installation | ~5-7 min | Production-like setup |
+| **Vagrant Box** | Uses pre-built Vagrant box | ~2-3 min | Reusable environments |
+
+> **Note:** Raw image mode uses copy-on-write (CoW) overlays for fast, space-efficient VM provisioning.
 
 ## Prerequisites
 
@@ -71,6 +81,11 @@ MAC_PREFIX=52:54:00:00:00
 
 # Cluster Name (for talosctl)
 CLUSTER_NAME=talos-default
+
+# Provisioning Mode (choose one)
+USE_RAW_IMAGE=true   # Use raw disk image (recommended, faster)
+USE_BOX=false        # Use Vagrant box
+# If both false, falls back to ISO installation
 ```
 
 ## Usage
@@ -129,20 +144,32 @@ vagrant ssh talos-master
 ### vms-startup.sh
 
 The startup script calls each step as a **function** with explicit parameters from `.env`.
+The script automatically detects the provisioning mode from `.env` settings.
+
+#### Raw Image Mode Steps (default)
 
 | Step | Function                      | Description                                    |
 | ---- | ----------------------------- | ---------------------------------------------- |
 | 01   | `step_01_authenticate_sudo`   | Sudo authentication (cached for 15 min)        |
 | 02   | `step_02_check_prerequisites` | Verify Vagrantfile, vagrant-libvirt, libvirtd  |
+| 03   | `step_03_prepare_raw_image`   | Download/decompress Talos raw disk image       |
+| 04   | `step_04_create_vm_disks`     | Create CoW overlay disks for each VM           |
+| 05   | `step_05_setup_network`       | Run `prepare-network.sh`                       |
+| 06   | `step_06_cleanup_vms`         | Remove old VM overlays (unless `-s` flag)      |
+| 07   | `step_07_start_vms`           | Start VMs via Vagrant                          |
+| 08   | `step_08_wait_for_talos`      | Wait for Talos READY                           |
+| 09   | `step_09_reboot_verify`       | Reboot VMs, verify disk boot                   |
+| 10   | `step_10_summary`             | Display summary and next steps                 |
+
+#### ISO Installation Mode Steps
+
+| Step | Function                      | Description                                    |
+| ---- | ----------------------------- | ---------------------------------------------- |
+| 01-05| (same as above)              | Same setup steps                               |
 | 03   | `step_03_prepare_iso`         | Download/verify Talos ISO                      |
 | 04   | `step_04_copy_iso_to_pool`    | Copy ISO to storage pool                       |
-| 05   | `step_05_setup_network`       | Run `prepare-network.sh`                       |
-| 06   | `step_06_cleanup_vms`         | Remove old VM disks (unless `-s` flag)         |
-| 07   | `step_07_start_vms`           | Start VMs via Vagrant                          |
-| 08   | `step_08_wait_for_talos`      | Wait for Talos READY (can run async with `-a`) |
-| 09   | `step_09_eject_iso`           | Eject ISO from all VMs, set disk boot          |
-| 10   | `step_10_reboot_verify`       | Reboot VMs, verify disk boot                   |
-| 11   | `step_11_summary`             | Display summary and next steps                 |
+| 09   | `step_09_reboot_verify`       | Reboot VMs after ISO installation              |
+| 10   | `step_10_summary`             | Display summary and next steps                 |
 
 **Execution flow**:
 
@@ -151,11 +178,13 @@ Step 01: Async + Wait → completes
      ↓
 Step 02: Async + Wait → completes
      ↓
-Step 03: Async + Wait → completes
+Step 03: Async + Wait → completes (download image/ISO)
+     ↓
+Step 04: Async + Wait → completes (create disks)
      ↓
 ...
      ↓
-Step 11: Async + Wait → completes
+Step 10: Async + Wait → completes
 ```
 
 **Important**: Each step runs in a separate process (async) but script waits for completion before starting the next step.
@@ -169,7 +198,7 @@ Step 11: Async + Wait → completes
 # Skip cleanup
 ./scripts/vms-startup.sh -s
 
-# Force reset (destroy disks)
+# Force reset (destroy disks/overlays)
 ./scripts/vms-startup.sh -f
 ```
 

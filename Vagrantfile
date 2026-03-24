@@ -20,14 +20,21 @@ BOX_NAME = ENV['BOX_NAME'] || 'talos'
 BOX_VERSION = ENV['BOX_VERSION'] || 'v1.11.5'
 
 # Talos Disk Image Configuration
+# ISO-based installation (traditional)
 TALOS_IMAGE_URL = ENV['TALOS_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/#{BOX_VERSION}/metal-amd64.iso"
 TALOS_IMAGE_PATH = ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso"
+
+# Raw disk image (faster provisioning)
+USE_RAW_IMAGE = ENV['USE_RAW_IMAGE'] == 'true'
+TALOS_RAW_IMAGE_URL = ENV['TALOS_RAW_IMAGE_URL'] || "https://github.com/siderolabs/talos/releases/download/#{BOX_VERSION}/metal-amd64.raw.zst"
+TALOS_RAW_IMAGE_PATH = ENV['TALOS_RAW_IMAGE_PATH'] || "./metal-amd64.raw"
+TALOS_RAW_IMAGE_COMPRESSED = ENV['TALOS_RAW_IMAGE_COMPRESSED'] || "./metal-amd64.raw.zst"
 
 # MAC Address Configuration
 MAC_PREFIX = ENV['MAC_PREFIX'] || "52:54:00:00:00"
 
-# Ensure Talos image exists (if not using box)
-unless USE_BOX || File.exist?(TALOS_IMAGE_PATH)
+# Ensure Talos image exists (if not using box or raw image)
+if !USE_BOX && !USE_RAW_IMAGE && !File.exist?(TALOS_IMAGE_PATH)
   puts "Downloading Talos Linux ISO..."
   system("curl -L -o #{TALOS_IMAGE_PATH} #{TALOS_IMAGE_URL}") || system("wget -O #{TALOS_IMAGE_PATH} #{TALOS_IMAGE_URL}")
   unless File.exist?(TALOS_IMAGE_PATH)
@@ -37,12 +44,18 @@ unless USE_BOX || File.exist?(TALOS_IMAGE_PATH)
   puts "Talos ISO download complete."
 end
 
+# Ensure raw image exists (if using raw image mode)
+if USE_RAW_IMAGE && !File.exist?(TALOS_RAW_IMAGE_PATH)
+  puts "Raw image mode enabled but raw image not found. Run: ./scripts/vms-startup.sh"
+  puts "The startup script will download and decompress the raw image automatically."
+end
+
 # Function to configure a Talos VM
 def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size_gb = 5)
   config.vm.define name do |vm|
     vm.vm.hostname = name
 
-    # Use box if configured, otherwise use ISO
+    # Use box if configured
     if ENV['USE_BOX'] == 'true'
       vm.vm.box = ENV['BOX_NAME'] || 'talos'
     end
@@ -60,8 +73,19 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
       domain.memory = memory_mb
       domain.cpus = cpus
 
-      # Boot from ISO if not using box
-      if ENV['USE_BOX'] != 'true'
+      # Raw image mode - use pre-installed disk image
+      # Vagrant will create the disk in the storage pool
+      if ENV['USE_RAW_IMAGE'] == 'true'
+        # For raw image mode, we create a volume from the raw image
+        # The startup script handles creating CoW overlays in the pool
+        domain.storage :file,
+                       size: "#{disk_size_gb}G",
+                       bus: 'virtio',
+                       cache: 'none'
+        domain.boot 'hd'
+        
+      # ISO-based installation (traditional)
+      elsif ENV['USE_BOX'] != 'true'
         # CDROM with Talos ISO (boot first for installation)
         domain.storage :file,
                        device: :cdrom,
@@ -74,8 +98,9 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
         # Boot order: CDROM first (for install), then disk (for normal operation)
         domain.boot 'cdrom'
         domain.boot 'hd'
+        
+      # Using Vagrant box
       else
-        # Using box - boot from disk only
         domain.storage :file,
                        size: "#{disk_size_gb}G",
                        bus: 'virtio',

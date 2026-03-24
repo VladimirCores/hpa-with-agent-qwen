@@ -11,11 +11,18 @@ After VMs are running, this step covers:
 3. **Install Kubernetes Components** - CNI, metrics-server, and essential addons
 4. **Verify Cluster** - Ensure everything is working correctly
 
-> **ℹ️ Talos v1.12.x Notes**
+### Provisioning Mode Differences
+
+| Mode | Bootstrap Approach | Notes |
+|------|-------------------|-------|
+| **Raw Image** | VMs boot with Talos pre-installed | Requires `talosctl reset` before re-bootstrap |
+| **ISO Install** | VMs boot to maintenance mode | Clean install on empty disk |
+
+> **ℹ️ Talos v1.12.x Notes (ISO Mode)**
 >
 > Talos v1.12.x requires **empty disks** to boot into maintenance mode for bootstrap.
 >
-> **Workflow**:
+> **Workflow (ISO Mode)**:
 >
 > ```bash
 > # 1. Full cleanup (wipes all disks)
@@ -27,26 +34,29 @@ After VMs are running, this step covers:
 > # 3. Bootstrap (generates secrets, configs, applies config)
 > ./scripts/talos-bootstrap.sh
 > ```
+
+> **ℹ️ Raw Image Mode**
 >
-> **Bootstrap script steps**:
+> VMs boot directly into Talos from pre-installed disk image.
 >
-> 1. Check prerequisites (talosctl, kubectl, VMs)
-> 2. **Generate secrets bundle** (`talosctl gen secrets`)
-> 3. Generate machine configs (using secrets bundle)
-> 4. Wait for nodes (all VMs accessible)
-> 5. Bootstrap cluster (before apply-config)
-> 6. Apply configs (master + workers)
-> 7. Wait for reboot
-> 8. Verify cluster
-> 9. Configure kubectl
-> 10. Set boot order to disk
+> **Workflow (Raw Image Mode)**:
 >
+> ```bash
+> # 1. Start VMs (boots from raw image)
+> ./scripts/vms-startup.sh
+>
+> # 2. Bootstrap (automatically resets if needed)
+> ./scripts/talos-bootstrap.sh
+> ```
+>
+> The bootstrap script automatically detects if Talos state exists and performs reset if needed.
+
 > **Verify maintenance mode**:
 >
 > ```bash
 > talosctl get machineconfig --nodes 10.0.0.10 --insecure
 > # Empty output or success = maintenance mode ✓
-> # PermissionDenied = cluster mode (run cleanup)
+> # PermissionDenied = cluster mode (run cleanup or reset)
 > ```
 
 ### Architecture
