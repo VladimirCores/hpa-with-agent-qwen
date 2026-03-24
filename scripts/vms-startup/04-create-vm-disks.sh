@@ -89,26 +89,41 @@ replace_with_overlay() {
     local volume_path="$POOL_PATH/$volume_name"
     local temp_path="$POOL_PATH/${volume_name}.tmp"
     
+    # Determine disk size based on VM role
+    local disk_size_gb
+    if [[ "$vm_name" == "$MASTER_NAME" ]]; then
+        disk_size_gb="${MASTER_DISK:-50}"
+    else
+        disk_size_gb="${WORKER_DISK:-20}"
+    fi
+
     # Check if volume exists
     if ! virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$volume_name" &>/dev/null; then
         echo "  Volume not found: $vm_name"
         return 1
     fi
-    
+
     # Get volume info to check if it's already an overlay
     vol_info=$(virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$volume_name" 2>/dev/null)
     if echo "$vol_info" | grep -q "Backing file.*talos-base-image"; then
         echo "  ✓ Already a CoW overlay: $vm_name"
+        # Check if resize is needed
+        local current_size=$(echo "$vol_info" | grep "Capacity:" | awk '{print $2}' | sed 's/GiB//')
+        if (( $(echo "$current_size < $disk_size_gb" | bc -l 2>/dev/null || echo 0) )); then
+            echo "  Resizing disk from ${current_size}GiB to ${disk_size_gb}GiB..."
+            sudo qemu-img resize "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
+            echo "  ✓ Disk resized"
+        fi
         return 0
     fi
-    
-    echo "  Replacing with CoW overlay: $vm_name"
-    
+
+    echo "  Replacing with CoW overlay: $vm_name (size: ${disk_size_gb}G)"
+
     # Move existing volume to temp
     sudo mv "$volume_path" "$temp_path"
-    
-    # Create CoW overlay in place
-    sudo qemu-img create -f qcow2 -F qcow2 -b "$POOL_PATH/$BASE_VOLUME_NAME" "$volume_path" >/dev/null 2>&1
+
+    # Create CoW overlay with correct virtual size
+    sudo qemu-img create -f qcow2 -F qcow2 -b "$POOL_PATH/$BASE_VOLUME_NAME" "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
     
     if [[ $? -eq 0 ]]; then
         sudo chown qemu:kvm "$volume_path"
