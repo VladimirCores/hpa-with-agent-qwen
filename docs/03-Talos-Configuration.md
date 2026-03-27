@@ -90,9 +90,11 @@ After VMs are running, this step covers:
 | Hubble         | bundled          | Network observability (Cilium) |
 | metrics-server | 0.7.1            | Resource metrics API    |
 | kube-proxy     | bundled          | Service networking      |
+| **Infisical**  | 0.60.0           | Secret manager with dashboard (optional) |
 
 > **Note:** Istio with Envoy Gateway will be added in the next step using Helm.
 > **Note:** Calico or Flannel can be used instead of Cilium: `./scripts/k8s-components.sh --cni-calico` or `--cni-flannel`
+> **Note:** Install Infisical for secret management: `./scripts/infisical-install.sh`
 
 ## Prerequisites
 
@@ -489,6 +491,17 @@ After completing this step:
 4. ✓ Hubble provides network observability
 5. ✓ metrics-server enables HPA
 
+**Optional:** Install Infisical Secret Manager for secret management:
+
+```bash
+# Install Infisical
+./scripts/infisical-install.sh
+
+# Access dashboard
+kubectl port-forward svc/infisical-ui -n infisical 8080:80
+# Open http://localhost:8080
+```
+
 **Next:** Install Istio with Envoy Gateway using Helm (see `04-Istio-Envoy-Gateway.md`)
 
 ```bash
@@ -520,3 +533,54 @@ With Cilium installed, you can now:
    kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
      /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
    ```
+
+### Managing Secrets with Infisical
+
+After installing Infisical:
+
+1. **Access the dashboard** at `http://localhost:8080`
+
+2. **Create your first project:**
+   - Click "Create Project"
+   - Name it (e.g., "sample-app")
+   - Add secrets (key-value pairs)
+
+3. **Sync secrets to Kubernetes:**
+   ```yaml
+   # Create InfisicalSecret CR
+   apiVersion: infisical.com/v1alpha1
+   kind: InfisicalSecret
+   metadata:
+     name: sample-app-secrets
+     namespace: default
+   spec:
+     authentication:
+       serviceAccountName: sample-app-sa
+     infisicalSecret:
+       secretPath: /
+       environmentName: dev
+     managedSecretReference:
+       secretName: sample-app-secrets
+       secretType: Opaque
+   ```
+
+4. **Use secrets in your deployment:**
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: sample-app
+   spec:
+     template:
+       spec:
+         containers:
+         - name: app
+           envFrom:
+           - secretRef:
+               name: sample-app-secrets
+   ```
+
+**Resources:**
+- [Infisical Documentation](https://infisical.com/docs/documentation/getting-started/introduction)
+- [Kubernetes Operator](https://infisical.com/docs/documentation/getting-started/kubernetes)
+- [GitHub Repository](https://github.com/Infisical/infisical)

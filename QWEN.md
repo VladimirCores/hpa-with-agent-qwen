@@ -33,6 +33,7 @@ This project sets up a **Talos Linux Kubernetes cluster** using Vagrant and libv
 | **Kubernetes** | Container orchestration |
 | **Cilium CNI** (default) | eBPF-based pod networking & observability |
 | **Hubble** | Network observability (bundled with Cilium) |
+| **Infisical** | Secret manager with web dashboard |
 | **Istio + Envoy Gateway** | Service mesh and API gateway |
 | **metrics-server** | Resource metrics for HPA |
 
@@ -67,6 +68,7 @@ with-agent-qwen/
 │   ├── vms-cleanup.sh
 │   ├── talos-bootstrap.sh
 │   ├── k8s-components.sh
+│   ├── infisical-install.sh  # Secret manager installation
 │   ├── istio-install.sh
 │   ├── create-talos-box.sh
 │   └── set-boot-order.sh
@@ -314,29 +316,35 @@ mkdir -p .vagrant/raw-disks
    ./scripts/k8s-components.sh
    ```
 
-2. **Deploy sample application:**
+2. **Install Infisical Secret Manager (optional - for secret management):**
+   ```bash
+   ./scripts/infisical-install.sh
+   # Access dashboard: kubectl port-forward svc/infisical-ui -n infisical 8080:80
+   ```
+
+3. **Deploy sample application:**
    ```bash
    kubectl apply -f docs/examples/sample-app.yaml
    ```
 
-3. **Configure HPA:**
+4. **Configure HPA:**
    ```bash
    kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
    ```
 
-4. **Generate load and observe scaling:**
+5. **Generate load and observe scaling:**
    ```bash
    kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
      /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
    ```
 
-5. **Monitor with Hubble (Cilium observability):**
+6. **Monitor with Hubble (Cilium observability):**
    ```bash
    kubectl port-forward -n kube-system svc/hubble-ui 8080:80
    # Then open http://localhost:8080
    ```
 
-6. **Monitor with Istio (if installed):**
+7. **Monitor with Istio (if installed):**
    ```bash
    kubectl port-forward -n istio-system svc/grafana 3000:3000
    ```
@@ -348,5 +356,7 @@ mkdir -p .vagrant/raw-disks
 - [Talos Documentation](https://www.talos.dev/)
 - [Vagrant libvirt Provider](https://github.com/vagrant-libvirt/vagrant-libvirt)
 - [Kubernetes HPA](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+- [Cilium & Hubble](https://cilium.io/)
+- [Infisical Secret Manager](https://infisical.com/)
 - [Istio Documentation](https://istio.io/)
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
