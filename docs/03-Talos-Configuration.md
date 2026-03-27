@@ -498,8 +498,8 @@ After completing this step:
 ./scripts/infisical-install.sh
 
 # Access dashboard
-kubectl port-forward svc/infisical-ui -n infisical 8080:80
-# Open http://localhost:8080
+kubectl port-forward svc/infisical-ui -n infisical 8081:80
+# Open http://localhost:8081
 ```
 
 **Next:** Install Istio with Envoy Gateway using Helm (see `04-Istio-Envoy-Gateway.md`)
@@ -538,7 +538,7 @@ With Cilium installed, you can now:
 
 After installing Infisical:
 
-1. **Access the dashboard** at `http://localhost:8080`
+1. **Access the dashboard** at `http://localhost:8081`
 
 2. **Create your first project:**
    - Click "Create Project"

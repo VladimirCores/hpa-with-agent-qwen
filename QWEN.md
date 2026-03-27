@@ -319,7 +319,7 @@ mkdir -p .vagrant/raw-disks
 2. **Install Infisical Secret Manager (optional - for secret management):**
    ```bash
    ./scripts/infisical-install.sh
-   # Access dashboard: kubectl port-forward svc/infisical-ui -n infisical 8080:80
+   # Access dashboard: kubectl port-forward svc/infisical-ui -n infisical 8081:80
    ```
 
 3. **Deploy sample application:**
