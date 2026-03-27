@@ -57,6 +57,33 @@ echo "    - controlplane.yaml"
 echo "    - worker.yaml"
 echo "    - talosconfig"
 
+# Fix install disk for libvirt virtio disks
+# Talos default is /dev/sda, but libvirt virtio disks appear as /dev/vda
+echo ""
+echo "  Patching install disk for libvirt virtio (/dev/sda -> /dev/vda)..."
+
+PATCHED=false
+for config_file in "$CONFIG_DIR/controlplane.yaml" "$CONFIG_DIR/worker.yaml"; do
+    if grep -q "disk: /dev/sda" "$config_file"; then
+        sed -i 's|disk: /dev/sda|disk: /dev/vda|g' "$config_file"
+        PATCHED=true
+    fi
+done
+
+if $PATCHED; then
+    echo "  ✓ Install disk patched to /dev/vda (libvirt virtio)"
+else
+    echo "  ✓ Install disk already correct or no patch needed"
+fi
+
+# Verify the patch
+if grep -q "disk: /dev/vda" "$CONFIG_DIR/controlplane.yaml"; then
+    echo "  ✓ Verified: controlplane.yaml uses /dev/vda"
+fi
+if grep -q "disk: /dev/vda" "$CONFIG_DIR/worker.yaml"; then
+    echo "  ✓ Verified: worker.yaml uses /dev/vda"
+fi
+
 # Extract certificates for reference using bash only
 echo ""
 echo "  Extracting certificates..."

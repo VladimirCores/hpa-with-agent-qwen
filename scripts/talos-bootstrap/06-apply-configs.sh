@@ -19,6 +19,21 @@ if [[ ! -f "$CONFIG_DIR/controlplane.yaml" ]] || [[ ! -f "$CONFIG_DIR/worker.yam
     exit 1
 fi
 
+# Verify install disk configuration
+echo ""
+echo "  Verifying install disk configuration..."
+INSTALL_DISK=$(grep "^        disk:" "$CONFIG_DIR/controlplane.yaml" | head -1 | awk '{print $2}')
+if [[ "$INSTALL_DISK" == "/dev/vda" ]]; then
+    echo "  ✓ Install disk correctly set to /dev/vda (libvirt virtio)"
+elif [[ "$INSTALL_DISK" == "/dev/sda" ]]; then
+    echo "  WARNING: Install disk is /dev/sda, but libvirt virtio uses /dev/vda"
+    echo "  Run step 03 to regenerate configs with correct disk"
+    exit 1
+else
+    echo "  ✓ Install disk set to: $INSTALL_DISK"
+fi
+echo ""
+
 # Apply to control plane
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
 if talosctl apply-config --nodes "$MASTER_IP" --file "$CONFIG_DIR/controlplane.yaml" --insecure; then
