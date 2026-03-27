@@ -86,11 +86,13 @@ After VMs are running, this step covers:
 | -------------- | ---------------- | ----------------------- |
 | Talos          | latest           | Kubernetes OS           |
 | Kubernetes     | bundled by Talos | Container orchestration |
-| Flannel CNI    | latest           | Pod networking          |
-| metrics-server | latest           | Resource metrics API    |
+| Cilium CNI     | 1.16.0           | eBPF-based pod networking & observability |
+| Hubble         | bundled          | Network observability (Cilium) |
+| metrics-server | 0.7.1            | Resource metrics API    |
 | kube-proxy     | bundled          | Service networking      |
 
 > **Note:** Istio with Envoy Gateway will be added in the next step using Helm.
+> **Note:** Calico or Flannel can be used instead of Cilium: `./scripts/k8s-components.sh --cni-calico` or `--cni-flannel`
 
 ## Prerequisites
 
@@ -304,7 +306,7 @@ Usage:
 
 Installs general Kubernetes components:
 
-1. **Flannel CNI** - Pod networking
+1. **Cilium CNI** (default) - eBPF-based pod networking with Hubble observability
 2. **metrics-server** - Resource metrics for HPA
 3. **CoreDNS** - Cluster DNS (already in Talos)
 4. **kube-proxy** - Service networking (already in Talos)
@@ -312,11 +314,13 @@ Installs general Kubernetes components:
 Usage:
 
 ```bash
-# Install all components
+# Install all components (Cilium + metrics-server)
 ./scripts/k8s-components.sh
 
-# Install specific component
-./scripts/k8s-components.sh --component flannel
+# Install specific CNI
+./scripts/k8s-components.sh --cni-cilium    # Cilium (default)
+./scripts/k8s-components.sh --cni-calico    # Calico instead
+./scripts/k8s-components.sh --cni-flannel   # Flannel instead
 
 # Show available components
 ./scripts/k8s-components.sh --list
@@ -350,12 +354,26 @@ kubectl cluster-info
 ### Check CNI
 
 ```bash
-# Check Flannel pods
-kubectl get pods -n kube-system -l app=flannel
+# Check Cilium pods
+kubectl get pods -n kube-system -l k8s-app=cilium
+
+# Check Cilium status (requires Cilium CLI)
+cilium status
 
 # Check pod networking
 kubectl run test --image=nginx --restart=Never
 kubectl get pods -o wide
+```
+
+### Check Hubble (Cilium Observability)
+
+```bash
+# Check Hubble pods
+kubectl get pods -n kube-system -l k8s-app=hubble-relay
+
+# Port-forward Hubble UI
+kubectl port-forward -n kube-system svc/hubble-ui 8080:80
+# Then open http://localhost:8080
 ```
 
 ### Check metrics-server
@@ -428,10 +446,29 @@ talosctl kubeconfig . --nodes 10.0.0.10 --force
 
 ### CNI not working
 
-Reinstall Flannel:
-
+**Check Cilium status:**
 ```bash
-kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+cilium status
+kubectl get pods -n kube-system -l k8s-app=cilium
+```
+
+**Reinstall Cilium:**
+```bash
+helm uninstall cilium -n kube-system
+./scripts/k8s-components.sh --cni-cilium
+```
+
+**Check eBPF support:**
+```bash
+# Cilium requires kernel 5.4+ for full eBPF features
+uname -r
+```
+
+**Legacy routing mode (if eBPF not supported):**
+```bash
+helm upgrade --install cilium cilium/cilium \
+  --namespace kube-system \
+  --set enable-host-legacy-routing=true
 ```
 
 ### metrics-server fails
@@ -448,8 +485,9 @@ After completing this step:
 
 1. ✓ Talos cluster is bootstrapped
 2. ✓ Kubernetes is running
-3. ✓ CNI provides pod networking
-4. ✓ metrics-server enables HPA
+3. ✓ Cilium CNI provides eBPF-based pod networking
+4. ✓ Hubble provides network observability
+5. ✓ metrics-server enables HPA
 
 **Next:** Install Istio with Envoy Gateway using Helm (see `04-Istio-Envoy-Gateway.md`)
 
@@ -457,3 +495,28 @@ After completing this step:
 # Preview: Install Istio
 ./scripts/istio-install.sh
 ```
+
+### HPA Study Setup
+
+With Cilium installed, you can now:
+
+1. **Deploy sample application:**
+   ```bash
+   kubectl apply -f docs/examples/sample-app.yaml
+   ```
+
+2. **Configure HPA:**
+   ```bash
+   kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
+   ```
+
+3. **Monitor with Hubble:**
+   ```bash
+   kubectl port-forward -n kube-system svc/hubble-ui 8080:80
+   ```
+
+4. **Generate load and observe scaling:**
+   ```bash
+   kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
+     /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
+   ```

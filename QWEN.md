@@ -31,9 +31,12 @@ This project sets up a **Talos Linux Kubernetes cluster** using Vagrant and libv
 | **Talos Linux** | Immutable, minimal Kubernetes OS |
 | **Vagrant + libvirt** | VM provisioning and management |
 | **Kubernetes** | Container orchestration |
-| **Cilium/Calico/Flannel** | CNI for pod networking |
+| **Cilium CNI** (default) | eBPF-based pod networking & observability |
+| **Hubble** | Network observability (bundled with Cilium) |
 | **Istio + Envoy Gateway** | Service mesh and API gateway |
 | **metrics-server** | Resource metrics for HPA |
+
+> **Note:** Calico or Flannel can be used instead of Cilium via `./scripts/k8s-components.sh --cni-calico` or `--cni-flannel`
 
 ### Provisioning Modes
 
@@ -306,24 +309,36 @@ mkdir -p .vagrant/raw-disks
 
 ## Next Steps for HPA Study
 
-1. **Deploy sample application**
+1. **Install Kubernetes components (Cilium + metrics-server):**
+   ```bash
+   ./scripts/k8s-components.sh
+   ```
+
+2. **Deploy sample application:**
    ```bash
    kubectl apply -f docs/examples/sample-app.yaml
    ```
 
-2. **Configure HPA**
+3. **Configure HPA:**
    ```bash
    kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
    ```
 
-3. **Generate load and observe scaling**
+4. **Generate load and observe scaling:**
    ```bash
-   kubectl run -i --tty load-generator --image=busybox --restart=Never -- /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
+   kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
+     /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
    ```
 
-4. **Monitor with Istio/Hubble**
+5. **Monitor with Hubble (Cilium observability):**
    ```bash
    kubectl port-forward -n kube-system svc/hubble-ui 8080:80
+   # Then open http://localhost:8080
+   ```
+
+6. **Monitor with Istio (if installed):**
+   ```bash
+   kubectl port-forward -n istio-system svc/grafana 3000:3000
    ```
 
 ---
