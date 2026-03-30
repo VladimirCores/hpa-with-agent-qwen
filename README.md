@@ -21,6 +21,7 @@ cp .env.example .env
 
 # (Optional) Edit .env to customize settings
 # Common settings:
+# - BOX_VERSION - Talos version (used for ISO and raw image URLs)
 # - MASTER_CPUS, MASTER_MEMORY - Master node resources
 # - WORKER_COUNT - Number of worker nodes
 # - TALOS_IMAGE_URL - Talos version to use
