@@ -155,21 +155,32 @@ install_cilium() {
         echo "  ✓ Cilium CLI installed"
     fi
 
-    # Install Cilium via Helm
-    echo "  Installing Cilium $CILIUM_VERSION..."
+    # Install Cilium via Helm (Talos-specific configuration)
+    echo "  Installing Cilium $CILIUM_VERSION for Talos Linux..."
     if ! helm repo add cilium &>/dev/null; then
         helm repo add cilium https://helm.cilium.io/
     fi
     helm repo update
 
+    # Talos-specific Cilium configuration:
+    # - kubeProxyReplacement=true: Cilium replaces kube-proxy
+    # - cgroup settings: Reuse Talos cgroupv2 mount
+    # - k8sServiceHost/Port: Use KubePrism proxy on localhost:7445
+    # - SYS_MODULE capability dropped: Talos doesn't allow kernel module loading
     helm upgrade --install cilium cilium/cilium \
         --version $CILIUM_VERSION \
         --namespace kube-system \
         --set ipam.mode=kubernetes \
         --set kubeProxyReplacement=true \
+        --set cgroup.autoMount.enabled=false \
+        --set cgroup.hostRoot=/sys/fs/cgroup \
+        --set k8sServiceHost=localhost \
+        --set k8sServicePort=7445 \
         --set hubble.enabled=true \
         --set hubble.relay.enabled=true \
         --set hubble.ui.enabled=true \
+        --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,http}" \
+        --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
         --wait --timeout 10m
 
     # Wait for Cilium pods

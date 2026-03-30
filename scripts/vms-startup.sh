@@ -146,6 +146,20 @@ step_08_wait_for_talos() {
     source "$STEPS_DIR/08-wait-for-talos.sh"
 }
 
+step_08b_apply_cilium_configs() {
+    # Apply Cilium-ready configs immediately after Talos boots
+    # This MUST run before Talos installs to disk
+    NETWORK_NAME="$NETWORK_NAME" \
+    MASTER_NAME="$MASTER_NAME" \
+    MASTER_IP="$MASTER_IP" \
+    WORKER_COUNT="$WORKER_COUNT" \
+    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
+    WORKER_IP_BASE="$WORKER_IP_BASE" \
+    LIBVIRT_URI="$LIBVIRT_URI" \
+    PROJECT_ROOT="$PROJECT_ROOT" \
+    bash "$STEPS_DIR/08b-apply-cilium-configs.sh"
+}
+
 step_09_disable_boot_menu() {
     NETWORK_NAME="$NETWORK_NAME" \
     MASTER_NAME="$MASTER_NAME" \
@@ -206,14 +220,21 @@ run_step_sync "07: Start VMs" "step_07_start_vms"
 run_step_sync "08: Create CoW overlays" "step_04_prepare_storage"
 run_step_sync "09: Disable boot menu" "step_09_disable_boot_menu"
 
-# Step 10: Source directly (preserves sudo context for virsh)
-echo "Starting: 10: Wait for Talos boot"
+# Step 08: Wait for Talos (source directly to preserve sudo context)
+echo "Starting: 08: Wait for Talos boot"
 step_08_wait_for_talos
 echo "  ✓ Completed"
 echo ""
 
-# Steps 11-12: Run synchronously
-run_step_sync "11: Reboot and verify" "step_10_reboot_verify"
-run_step_sync "12: Summary" "step_11_summary"
+# Step 08b: Apply Cilium configs (CRITICAL - must run before Talos installs)
+echo "Starting: 08b: Apply Cilium-Ready Configs"
+step_08b_apply_cilium_configs
+echo "  ✓ Completed"
+echo ""
+
+# Steps 09-11: Run synchronously
+run_step_sync "09: Disable boot menu" "step_09_disable_boot_menu"
+run_step_sync "10: Reboot and verify" "step_10_reboot_verify"
+run_step_sync "11: Summary" "step_11_summary"
 
 echo "=== VM Startup Complete ==="
