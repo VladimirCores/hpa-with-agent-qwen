@@ -21,7 +21,12 @@ source "$STEP_DIR/00-setup.sh"
 OVMF_CODE="/usr/share/OVMF/OVMF_CODE.fd"
 OVMF_VARS="/usr/share/OVMF/OVMF_VARS.fd"
 NVRAM_DIR="/var/lib/libvirt/qemu/nvram"
-ISO_PATH="${TALOS_IMAGE_PATH:-./metal-amd64.iso}"
+# Convert ISO_PATH to absolute path
+if [[ -f "$TALOS_IMAGE_PATH" ]]; then
+    ISO_PATH="$(cd "$(dirname "$TALOS_IMAGE_PATH")" && pwd)/$(basename "$TALOS_IMAGE_PATH")"
+else
+    ISO_PATH="${TALOS_IMAGE_PATH:-./metal-amd64.iso}"
+fi
 
 echo "[8b/12] Configuring UEFI Firmware for Talos VMs..."
 echo ""
@@ -185,14 +190,17 @@ echo ""
 echo "Checking VM UEFI configuration..."
 echo ""
 
-# Master VM
-MASTER_DISK_PATH="$POOL_PATH/with-agent-qwen_${MASTER_NAME}-vda.qcow2"
-if check_uefi_configured "$MASTER_NAME"; then
-    echo "  $MASTER_NAME: UEFI already configured ✓"
+# VM names include vagrant-libvirt prefix
+VAGRANT_PREFIX="with-agent-qwen_"
+MASTER_VM_NAME="${VAGRANT_PREFIX}${MASTER_NAME}"
+MASTER_DISK_PATH="$POOL_PATH/${MASTER_VM_NAME}-vda.qcow2"
+
+if check_uefi_configured "$MASTER_VM_NAME"; then
+    echo "  $MASTER_VM_NAME: UEFI already configured ✓"
     UEFI_ALREADY=$((UEFI_ALREADY + 1))
 else
-    echo "  $MASTER_NAME: UEFI not configured"
-    if configure_uefi "$MASTER_NAME" "$MASTER_MEMORY" "$MASTER_CPUS" "$MASTER_DISK_PATH" "$USE_ISO"; then
+    echo "  $MASTER_VM_NAME: UEFI not configured"
+    if configure_uefi "$MASTER_VM_NAME" "$MASTER_MEMORY" "$MASTER_CPUS" "$MASTER_DISK_PATH" "$USE_ISO"; then
         RECONFIGURED=$((RECONFIGURED + 1))
     fi
 fi
@@ -200,14 +208,15 @@ fi
 # Worker VMs
 for i in $(seq 1 $WORKER_COUNT); do
     WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
-    WORKER_DISK_PATH="$POOL_PATH/with-agent-qwen_${WORKER_NAME}-vda.qcow2"
+    WORKER_VM_NAME="${VAGRANT_PREFIX}${WORKER_NAME}"
+    WORKER_DISK_PATH="$POOL_PATH/${WORKER_VM_NAME}-vda.qcow2"
     
-    if check_uefi_configured "$WORKER_NAME"; then
-        echo "  $WORKER_NAME: UEFI already configured ✓"
+    if check_uefi_configured "$WORKER_VM_NAME"; then
+        echo "  $WORKER_VM_NAME: UEFI already configured ✓"
         UEFI_ALREADY=$((UEFI_ALREADY + 1))
     else
-        echo "  $WORKER_NAME: UEFI not configured"
-        if configure_uefi "$WORKER_NAME" "$WORKER_MEMORY" "$WORKER_CPUS" "$WORKER_DISK_PATH" "$USE_ISO"; then
+        echo "  $WORKER_VM_NAME: UEFI not configured"
+        if configure_uefi "$WORKER_VM_NAME" "$WORKER_MEMORY" "$WORKER_CPUS" "$WORKER_DISK_PATH" "$USE_ISO"; then
             RECONFIGURED=$((RECONFIGURED + 1))
         fi
     fi
@@ -219,26 +228,27 @@ echo ""
 if [[ $RECONFIGURED -gt 0 ]]; then
     echo "Starting VMs with UEFI firmware..."
     echo ""
-    
+
     # Master
-    echo "  Starting $MASTER_NAME..."
-    if virsh -c "$LIBVIRT_URI" start "$MASTER_NAME" 2>/dev/null; then
+    echo "  Starting $MASTER_VM_NAME..."
+    if virsh -c "$LIBVIRT_URI" start "$MASTER_VM_NAME" 2>/dev/null; then
         echo "    ✓ Started"
     else
         echo "    ✗ Failed to start"
     fi
-    
+
     # Workers
     for i in $(seq 1 $WORKER_COUNT); do
         WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
-        echo "  Starting $WORKER_NAME..."
-        if virsh -c "$LIBVIRT_URI" start "$WORKER_NAME" 2>/dev/null; then
+        WORKER_VM_NAME="${VAGRANT_PREFIX}${WORKER_NAME}"
+        echo "  Starting $WORKER_VM_NAME..."
+        if virsh -c "$LIBVIRT_URI" start "$WORKER_VM_NAME" 2>/dev/null; then
             echo "    ✓ Started"
         else
             echo "    ✗ Failed to start"
         fi
     done
-    
+
     echo ""
     echo "  Waiting for VMs to boot..."
     sleep 10
@@ -251,7 +261,7 @@ echo "Verifying UEFI configuration..."
 echo ""
 
 UEFI_VERIFIED=0
-for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+for vm_name in "$MASTER_VM_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${VAGRANT_PREFIX}${WORKER_NAME_PREFIX}${i}"; done); do
     if check_uefi_configured "$vm_name"; then
         echo "  $vm_name: UEFI verified ✓"
         UEFI_VERIFIED=$((UEFI_VERIFIED + 1))
