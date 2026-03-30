@@ -141,6 +141,23 @@ step_07_start_vms() {
     bash "$STEPS_DIR/07-start-vms.sh"
 }
 
+step_08b_configure_uefi() {
+    # Configure UEFI firmware for Talos VMs
+    # This MUST run before Talos can boot from ISO
+    NETWORK_NAME="$NETWORK_NAME" \
+    MASTER_NAME="$MASTER_NAME" \
+    MASTER_MEMORY="$MASTER_MEMORY" \
+    MASTER_CPUS="$MASTER_CPUS" \
+    WORKER_COUNT="$WORKER_COUNT" \
+    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
+    WORKER_MEMORY="$WORKER_MEMORY" \
+    WORKER_CPUS="$WORKER_CPUS" \
+    POOL_PATH="$POOL_PATH" \
+    LIBVIRT_URI="$LIBVIRT_URI" \
+    TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
+    bash "$STEPS_DIR/08b-configure-uefi.sh"
+}
+
 step_08_wait_for_talos() {
     # Source the step script directly to preserve environment
     source "$STEPS_DIR/08-wait-for-talos.sh"
@@ -217,17 +234,18 @@ run_step_sync "04: Create storage pool" "step_04_create_storage_pool"
 run_step_sync "05: Setup network" "step_05_setup_network"
 run_step_sync "06: Cleanup VMs" "step_06_cleanup_vms"
 run_step_sync "07: Start VMs" "step_07_start_vms"
-run_step_sync "08: Create CoW overlays" "step_04_prepare_storage"
+run_step_sync "07b: Create CoW overlays" "step_04_prepare_storage"
+run_step_sync "08: Configure UEFI" "step_08b_configure_uefi"
 run_step_sync "09: Disable boot menu" "step_09_disable_boot_menu"
 
-# Step 08: Wait for Talos (source directly to preserve sudo context)
-echo "Starting: 08: Wait for Talos boot"
+# Step 10: Wait for Talos (source directly to preserve sudo context)
+echo "Starting: 10: Wait for Talos boot"
 step_08_wait_for_talos
 echo "  ✓ Completed"
 echo ""
 
-# Step 08b: Apply Cilium configs (CRITICAL - must run before Talos installs)
-echo "Starting: 08b: Apply Cilium-Ready Configs"
+# Step 10b: Apply Cilium configs (CRITICAL - must run before Talos installs)
+echo "Starting: 10b: Apply Cilium-Ready Configs"
 step_08b_apply_cilium_configs
 echo "  ✓ Completed"
 echo ""

@@ -72,6 +72,7 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
       domain.driver = "qemu"
       domain.memory = memory_mb
       domain.cpus = cpus
+      domain.boot 'hd'
 
       # Raw image mode - use pre-installed disk image
       # Vagrant will create the disk in the storage pool
