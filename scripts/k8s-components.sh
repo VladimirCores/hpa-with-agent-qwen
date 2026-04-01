@@ -16,10 +16,10 @@ set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
-# Component versions
-CILIUM_VERSION="1.16.0"
-CALICO_VERSION="3.28.0"
-METRICS_SERVER_VERSION="0.7.1"
+# Use versions from .env if available, otherwise use defaults
+CILIUM_VERSION="${CILIUM_VERSION:-1.19.1}"
+CALICO_VERSION="${CALICO_VERSION:-3.28.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.7.1}"
 
 # Parse arguments
 INSTALL_ALL=true
@@ -77,6 +77,15 @@ fi
 echo "=== Kubernetes Components Installation ==="
 echo ""
 
+# Set default kubeconfig if not already set
+if [[ -z "${KUBECONFIG:-}" ]]; then
+    DEFAULT_KUBECONFIG="$PROJECT_ROOT/talos-cluster/kubeconfig"
+    if [[ -f "$DEFAULT_KUBECONFIG" ]]; then
+        export KUBECONFIG="$DEFAULT_KUBECONFIG"
+        echo "Using kubeconfig: $KUBECONFIG"
+    fi
+fi
+
 # =============================================================================
 # Prerequisites Check
 # =============================================================================
@@ -124,14 +133,25 @@ install_cilium() {
         fi
     fi
 
-    # Check if any CNI is installed
-    if kubectl get pods -n kube-system | grep -E "(flannel|calico|weave)" &>/dev/null; then
-        echo "  WARNING: Another CNI detected. Removing..."
-        kubectl delete daemonset kube-flannel -n kube-system --ignore-not-found 2>/dev/null || true
-        kubectl delete -f "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml" --ignore-not-found 2>/dev/null || true
-        echo "  Waiting for old CNI to be removed..."
-        sleep 10
+    # Remove Flannel CNI if present (required before installing Cilium)
+    echo "  Removing Flannel CNI (if present)..."
+    kubectl delete daemonset kube-flannel -n kube-system --ignore-not-found 2>/dev/null || true
+    kubectl delete -f "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml" --ignore-not-found 2>/dev/null || true
+    kubectl delete pod -n kube-system -l app=flannel --force --grace-period=0 --ignore-not-found 2>/dev/null || true
+    kubectl delete ns kube-flannel --ignore-not-found 2>/dev/null || true
+    echo "  ✓ Flannel removed"
+
+    # Remove Calico if present
+    if kubectl get ns calico-system &>/dev/null; then
+        echo "  Removing Calico (if present)..."
+        kubectl delete -f "https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml" --ignore-not-found 2>/dev/null || true
+        kubectl delete ns calico-system --ignore-not-found 2>/dev/null || true
+        echo "  ✓ Calico removed"
     fi
+
+    # Wait for old CNI pods to terminate
+    echo "  Waiting for old CNI pods to terminate..."
+    sleep 15
 
     # Check eBPF support
     echo "  Checking eBPF support..."
@@ -161,7 +181,7 @@ install_cilium() {
 
     # Install Cilium using cilium CLI (simpler and more reliable)
     echo "  Installing Cilium for Talos Linux with kube-proxy replacement..."
-    
+
     # Use cilium install command with Talos-compatible settings
     cilium install \
         --set kubeProxyReplacement=true \
@@ -173,7 +193,7 @@ install_cilium() {
         --set cni.chainingMode=none \
         --set cni.customConf=false \
         --set hubble.enabled=false \
-        --wait --timeout 10m
+        --wait
 
     # Wait for Cilium pods to be ready
     echo "  Waiting for Cilium pods to be ready..."
