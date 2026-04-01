@@ -1,6 +1,6 @@
 # Talos Kubernetes Cluster with HPA Study
 
-A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autoscaling (HPA) with optional Cilium CNI and Infisical secret management.
+A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autoscaling (HPA) with Cilium CNI and kube-proxy replacement.
 
 ## Quick Start
 
@@ -20,29 +20,16 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 cp .env.example .env
 
 # (Optional) Edit .env to customize settings
-# Common settings:
-# - BOX_VERSION - Talos version (used for ISO and raw image URLs)
-# - MASTER_CPUS, MASTER_MEMORY - Master node resources
-# - WORKER_COUNT - Number of worker nodes
-# - TALOS_IMAGE_URL - Talos version to use
 ```
 
 ### Step 2: Start VMs
 
 ```bash
-# Start all VMs (automatically handles network, storage, and VM creation)
+# Start all VMs
 ./scripts/vms-startup.sh
 ```
 
-**What this does:**
-- Creates libvirt network (10.0.0.0/24)
-- Creates storage pool for VM disks
-- Downloads Talos ISO if not present
-- Creates VMs with empty disks
-- Boots VMs from ISO (Talos installs to disk)
-- VMs reboot from disk after installation
-
-**Wait time:** ~5-7 minutes for first run
+**Wait time:** ~3-5 minutes (raw image mode with CoW overlays)
 
 ### Step 3: Bootstrap Talos Cluster
 
@@ -51,30 +38,22 @@ cp .env.example .env
 ./scripts/talos-bootstrap.sh
 ```
 
-**What this does:**
-- Generates cluster secrets
-- Generates machine configurations
-- Waits for all nodes to be ready
-- Bootstraps Kubernetes control plane
-- Applies configurations to all nodes
-- Fetches kubeconfig
+**Wait time:** ~2-3 minutes
 
-**Wait time:** ~3-5 minutes
-
-### Step 4: Install Kubernetes Components
+### Step 4: Install Cilium CNI
 
 ```bash
-# Install CNI and metrics-server (default: Flannel)
+# Install Cilium with kube-proxy replacement (default)
 ./scripts/k8s-components.sh
 
-# Or install Cilium instead:
-# ./scripts/k8s-components.sh --cni-cilium
+# Or install with metrics-server for HPA
+./scripts/k8s-components.sh -m
 ```
 
 **What this does:**
-- Installs CNI (Flannel or Cilium)
-- Installs metrics-server (required for HPA)
-- Waits for all components to be ready
+- Installs Cilium CNI (eBPF-based networking)
+- Enables kube-proxy replacement (BPF-based service routing)
+- Optionally installs metrics-server for HPA
 
 **Wait time:** ~2-3 minutes
 
@@ -87,94 +66,22 @@ kubectl get nodes
 # Check system pods
 kubectl get pods -A
 
-# Test HPA (metrics-server)
+# Check Cilium status
+cilium status
+
+# Test metrics (if installed)
 kubectl top nodes
 ```
 
-**Expected output:**
-```
-NAME             STATUS   ROLES           AGE   VERSION
-talos-master     Ready    control-plane   10m   v1.35.2
-talos-worker-1   Ready    <none>          10m   v1.35.2
-talos-worker-2   Ready    <none>          10m   v1.35.2
-```
+## Current Cluster Status
 
-## Optional Components
-
-### Infisical Secret Manager
-
-```bash
-# Install Infisical (secret manager with web dashboard)
-./scripts/infisical-install.sh
-
-# Access dashboard
-kubectl port-forward svc/infisical-ui -n infisical 8081:80
-# Open http://localhost:8081
-```
-
-### Istio with Envoy Gateway
-
-```bash
-# Install Istio (preview)
-./scripts/istio-install.sh
-```
-
-## Cluster Access
-
-### Using talosctl
-
-```bash
-# Talos cluster info
-talosctl get members --nodes 10.0.0.10
-
-# Talos services
-talosctl services --nodes 10.0.0.10
-```
-
-### Using kubectl
-
-```bash
-# Kubeconfig location
-export KUBECONFIG=/home/cores/.kube/config
-
-# Or use explicit kubeconfig
-kubectl --kubeconfig=talos-cluster/kubeconfig get nodes
-```
-
-## Management Commands
-
-### Start Cluster
-
-```bash
-# After host reboot, start VMs
-./scripts/vms-startup.sh
-```
-
-### Stop Cluster
-
-```bash
-# Stop VMs (preserves data)
-./scripts/vms-cleanup.sh
-```
-
-### Full Reset
-
-```bash
-# Destroy everything (network, storage, VMs)
-./scripts/vms-cleanup.sh -n
-```
-
-### Re-bootstrap
-
-```bash
-# Reset Talos cluster state (keeps VMs)
-talosctl reset --nodes 10.0.0.10 --graceful=false
-talosctl reset --nodes 10.0.0.11 --graceful=false
-talosctl reset --nodes 10.0.0.12 --graceful=false
-
-# Re-bootstrap
-./scripts/talos-bootstrap.sh
-```
+| Component | Status | Version |
+|-----------|--------|---------|
+| **Talos** | ✅ Ready | v1.12.6 |
+| **Kubernetes** | ✅ Ready | v1.35.2 |
+| **CNI** | ✅ Cilium | v1.19.1 |
+| **kube-proxy** | ✅ Replaced | BPF-based |
+| **metrics-server** | Optional | - |
 
 ## Architecture
 
@@ -189,128 +96,139 @@ talosctl reset --nodes 10.0.0.12 --graceful=false
 │  │ 4 CPU/4GB   │  │ 1 CPU/2GB   │  │ 1 CPU/2GB   │         │
 │  │ etcd, API   │  │ kubelet     │  │ kubelet     │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
+│                                                              │
+│  CNI: Cilium (eBPF)                                          │
+│  kube-proxy: Replaced with BPF                               │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │  Host (talosctl)  │
-                    └───────────────────┘
 ```
 
-## Default Configuration
+## CNI Options
 
-| Component | Setting | Value |
-|-----------|---------|-------|
-| **Network** | CIDR | 10.0.0.0/24 |
-| | Gateway | 10.0.0.1 |
-| **Master** | IP | 10.0.0.10 |
-| | CPUs | 4 |
-| | Memory | 4096 MB |
-| | Disk | 50 GB |
-| **Workers** | Count | 2 |
-| | IPs | 10.0.0.11, 10.0.0.12 |
-| | CPUs | 1 each |
-| | Memory | 2048 MB each |
-| | Disk | 20 GB each |
-| **CNI** | Default | Flannel |
-| | Alternative | Cilium (--cni-cilium) |
+### Cilium (Default)
+
+```bash
+# Install Cilium with kube-proxy replacement
+./scripts/k8s-components.sh
+
+# Check status
+cilium status
+```
+
+**Features:**
+- eBPF-based networking
+- kube-proxy replacement
+- Network policies
+- Hubble observability (optional)
+
+### Flannel (Alternative)
+
+```bash
+# Install Flannel instead
+./scripts/k8s-components.sh --cni-flannel
+```
+
+### Calico (Alternative)
+
+```bash
+# Install Calico instead
+./scripts/k8s-components.sh --cni-calico
+```
+
+## HPA Study Setup
+
+### With metrics-server (CPU/Memory HPA)
+
+```bash
+# Install metrics-server
+./scripts/k8s-components.sh -m
+
+# Deploy sample app
+kubectl apply -f docs/examples/sample-app.yaml
+
+# Create HPA
+kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
+
+# Generate load
+kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
+  /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
+
+# Monitor
+kubectl get hpa --watch
+```
+
+### Without metrics-server
+
+Use custom metrics or external metrics providers. See `docs/06-HPA-Study-Guide.md`
+
+## Management Commands
+
+```bash
+# Start cluster
+./scripts/vms-startup.sh
+
+# Stop cluster (preserves data)
+./scripts/vms-cleanup.sh
+
+# Full reset
+./scripts/vms-cleanup.sh -n
+
+# Re-bootstrap
+./scripts/talos-bootstrap.sh
+```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| `docs/01-Network-setup.md` | Network configuration |
+| `docs/02-Vagrant-VMs-provision.md` | VM provisioning |
+| `docs/03-Talos-Configuration.md` | Talos bootstrap |
+| `docs/04-Istio-Envoy-Gateway-Preview.md` | Istio installation |
+| `docs/05-Cilium-Setup.md` | Cilium CNI guide |
+| `docs/06-HPA-Study-Guide.md` | HPA examples and exercises |
 
 ## Troubleshooting
 
-### VMs Not Starting
+### Cilium Pods Not Ready
 
 ```bash
-# Check libvirtd
-systemctl status libvirtd
+# Check Cilium status
+cilium status
 
-# Check vagrant-libvirt plugin
-vagrant plugin list | grep libvirt
+# Check logs
+kubectl logs -n kube-system -l k8s-app=cilium
 
-# Check user permissions
-sudo usermod -aG libvirt $USER  # Then log out/in
-```
-
-### Talos API Not Accessible
-
-```bash
-# Check VM status
-virsh -c qemu:///system list | grep talos
-
-# Check DHCP leases
-virsh -c qemu:///system net-dhcp-leases cluster-talos-net
-
-# Check Talos in maintenance mode
-talosctl version --nodes 10.0.0.10 --insecure
-```
-
-### kubectl Cannot Connect
-
-```bash
-# Regenerate kubeconfig
-talosctl kubeconfig . --nodes 10.0.0.10 --force
-
-# Or merge with existing
-talosctl kubeconfig --merge --nodes 10.0.0.10
-```
-
-### CNI Pods Not Ready
-
-```bash
-# Check CNI pods
-kubectl get pods -n kube-system -l app=flannel
-
-# Or for Cilium
-kubectl get pods -n kube-system -l k8s-app=cilium
-
-# Reinstall CNI
-./scripts/k8s-components.sh --cni-flannel
-# or
-./scripts/k8s-components.sh --cni-cilium
+# Reinstall
+cilium uninstall --wait
+./scripts/k8s-components.sh
 ```
 
 ### Bootstrap Fails
 
 ```bash
 # Reset nodes
-talosctl reset --nodes 10.0.0.10 --graceful=false
-talosctl reset --nodes 10.0.0.11 --graceful=false
-talosctl reset --nodes 10.0.0.12 --graceful=false
+talosctl reset --nodes 10.0.0.10,10.0.0.11,10.0.0.12 --graceful=false
 
 # Re-bootstrap
 ./scripts/talos-bootstrap.sh
 ```
 
-## HPA Study Setup
-
-After cluster is ready:
+### Network Issues
 
 ```bash
-# 1. Deploy sample application
-kubectl apply -f docs/examples/sample-app.yaml
+# Check network
+virsh -c qemu:///system net-info cluster-talos-net
 
-# 2. Configure HPA
-kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
+# Check DHCP leases
+virsh -c qemu:///system net-dhcp-leases cluster-talos-net
 
-# 3. Generate load
-kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
-  /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
-
-# 4. Monitor scaling
-kubectl get hpa --watch
-kubectl get pods --watch
+# Recreate network
+./scripts/prepare-network.sh
 ```
-
-## Documentation
-
-- `docs/01-Network-setup.md` - Network configuration
-- `docs/02-Vagrant-VMs-provision.md` - VM provisioning
-- `docs/03-Talos-Configuration.md` - Talos bootstrap and K8s components
-- `docs/04-Istio-Envoy-Gateway-Preview.md` - Istio installation
-- `docs/05-Cilium-Setup.md` - Cilium CNI configuration
 
 ## Resources
 
 - [Talos Documentation](https://www.talos.dev/)
-- [Vagrant libvirt Provider](https://github.com/vagrant-libvirt/vagrant-libvirt)
-- [Kubernetes HPA](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
 - [Cilium Documentation](https://docs.cilium.io/)
-- [Infisical Documentation](https://infisical.com/docs)
+- [Kubernetes HPA](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+- [HPA Study Guide](docs/06-HPA-Study-Guide.md)

@@ -26,20 +26,23 @@ INSTALL_ALL=true
 SPECIFIC_COMPONENT=""
 CNI_CHOICE="cilium"
 LIST_COMPONENTS=false
+INSTALL_METRICS=false
 
-while getopts "c:-:" opt; do
+while getopts "c:m-:" opt; do
     case $opt in
         c) SPECIFIC_COMPONENT="$OPTARG"; INSTALL_ALL=false ;;
+        m) INSTALL_METRICS=true; INSTALL_ALL=false ;;
         -)
             case "${OPTARG}" in
                 list) LIST_COMPONENTS=true; INSTALL_ALL=false ;;
                 cni-cilium) CNI_CHOICE="cilium"; INSTALL_ALL=false ;;
                 cni-calico) CNI_CHOICE="calico"; INSTALL_ALL=false ;;
                 cni-flannel) CNI_CHOICE="flannel"; INSTALL_ALL=false ;;
+                with-metrics) INSTALL_METRICS=true ;;
                 *) echo "Unknown option: --${OPTARG}"; exit 1 ;;
             esac
             ;;
-        *) echo "Usage: $0 [-c component] [--list] [--cni-cilium] [--cni-calico] [--cni-flannel]"; exit 1 ;;
+        *) echo "Usage: $0 [-c component] [-m] [--list] [--cni-cilium] [--cni-calico] [--cni-flannel] [--with-metrics]"; exit 1 ;;
     esac
 done
 
@@ -109,7 +112,7 @@ echo ""
 # =============================================================================
 
 install_cilium() {
-    echo "[1/2] Installing Cilium CNI $CILIUM_VERSION..."
+    echo "[1/2] Installing Cilium CNI (latest stable)..."
 
     # Check if Cilium already exists
     if kubectl get pods -n kube-system -l k8s-app=cilium &>/dev/null; then
@@ -124,7 +127,10 @@ install_cilium() {
     # Check if any CNI is installed
     if kubectl get pods -n kube-system | grep -E "(flannel|calico|weave)" &>/dev/null; then
         echo "  WARNING: Another CNI detected. Removing..."
+        kubectl delete daemonset kube-flannel -n kube-system --ignore-not-found 2>/dev/null || true
         kubectl delete -f "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml" --ignore-not-found 2>/dev/null || true
+        echo "  Waiting for old CNI to be removed..."
+        sleep 10
     fi
 
     # Check eBPF support
@@ -135,10 +141,8 @@ install_cilium() {
 
     if (( KERNEL_MAJOR > 5 )) || (( KERNEL_MAJOR == 5 && KERNEL_MINOR >= 4 )); then
         echo "  ✓ Kernel $KERNEL_VERSION supports eBPF"
-        CILIUM_FLAGS="--set enable-bpf-masquerade=true --set enable-host-legacy-routing=false"
     else
         echo "  ⚠ Kernel $KERNEL_VERSION may have limited eBPF support"
-        CILIUM_FLAGS="--set enable-host-legacy-routing=true"
     fi
 
     # Install Cilium CLI if not present
@@ -147,7 +151,7 @@ install_cilium() {
         CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/master/stable.txt)
         CLI_ARCH="amd64"
         if [[ "$(uname -m)" == "aarch64" ]]; then CLI_ARCH="arm64"; fi
-        curl -L --fail --remote-name-all \
+        curl -sL --fail --remote-name-all \
             https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
         sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
         sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
@@ -155,41 +159,35 @@ install_cilium() {
         echo "  ✓ Cilium CLI installed"
     fi
 
-    # Install Cilium via Helm (Talos-specific configuration)
-    echo "  Installing Cilium $CILIUM_VERSION for Talos Linux..."
-    if ! helm repo add cilium &>/dev/null; then
-        helm repo add cilium https://helm.cilium.io/
-    fi
-    helm repo update
-
-    # Talos-specific Cilium configuration:
-    # - kubeProxyReplacement=true: Cilium replaces kube-proxy
-    # - cgroup settings: Reuse Talos cgroupv2 mount
-    # - k8sServiceHost/Port: Use KubePrism proxy on localhost:7445
-    # - SYS_MODULE capability dropped: Talos doesn't allow kernel module loading
-    helm upgrade --install cilium cilium/cilium \
-        --version $CILIUM_VERSION \
-        --namespace kube-system \
-        --set ipam.mode=kubernetes \
+    # Install Cilium using cilium CLI (simpler and more reliable)
+    echo "  Installing Cilium for Talos Linux with kube-proxy replacement..."
+    
+    # Use cilium install command with Talos-compatible settings
+    cilium install \
         --set kubeProxyReplacement=true \
-        --set cgroup.autoMount.enabled=false \
-        --set cgroup.hostRoot=/sys/fs/cgroup \
-        --set k8sServiceHost=localhost \
-        --set k8sServicePort=7445 \
-        --set hubble.enabled=true \
-        --set hubble.relay.enabled=true \
-        --set hubble.ui.enabled=true \
-        --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,http}" \
+        --set bpf.masquerade=true \
+        --set ipam.mode=kubernetes \
+        --set securityContext.privileged=true \
         --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
+        --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}" \
+        --set cni.chainingMode=none \
+        --set cni.customConf=false \
+        --set hubble.enabled=false \
         --wait --timeout 10m
 
-    # Wait for Cilium pods
-    echo "  Waiting for Cilium pods..."
+    # Wait for Cilium pods to be ready
+    echo "  Waiting for Cilium pods to be ready..."
+    sleep 10
     kubectl wait --for=condition=ready pod -l k8s-app=cilium -n kube-system --timeout=300s 2>/dev/null || {
-        echo "  WARNING: Cilium pods not ready within timeout"
+        echo "  WARNING: Cilium pods not ready within timeout, checking status..."
     }
 
-    echo "  ✓ Cilium installed"
+    # Remove kube-proxy (Cilium replaces it)
+    echo "  Removing kube-proxy (replaced by Cilium)..."
+    kubectl delete daemonset kube-proxy -n kube-system --ignore-not-found 2>/dev/null || true
+    kubectl delete pod -n kube-system -l k8s-app=kube-proxy --force --grace-period=0 --ignore-not-found 2>/dev/null || true
+
+    echo "  ✓ Cilium installed with kube-proxy replacement"
 }
 
 install_calico() {
@@ -299,7 +297,7 @@ install_metrics_server() {
 # =============================================================================
 
 if [[ "$INSTALL_ALL" == "true" ]]; then
-    echo "Installing all components (Cilium + metrics-server)..."
+    echo "Installing Cilium CNI (default)..."
     echo ""
 
     # Install selected CNI
@@ -316,8 +314,11 @@ if [[ "$INSTALL_ALL" == "true" ]]; then
     esac
     echo ""
 
-    install_metrics_server
-    echo ""
+    # Only install metrics-server if explicitly requested
+    if [[ "$INSTALL_METRICS" == "true" ]]; then
+        install_metrics_server
+        echo ""
+    fi
 else
     case "$SPECIFIC_COMPONENT" in
         cilium)
@@ -404,7 +405,7 @@ echo "Installed components:"
 case "$CNI_CHOICE" in
     cilium)
         echo "  ✓ Cilium CNI - eBPF-based pod networking"
-        echo "  ✓ Hubble - Network observability (built-in)"
+        echo "  ✓ kube-proxy replacement - BPF-based service routing"
         ;;
     calico)
         echo "  ✓ Calico CNI - BGP-based pod networking"
@@ -413,8 +414,10 @@ case "$CNI_CHOICE" in
         echo "  ✓ Flannel CNI - Simple overlay pod networking"
         ;;
 esac
-if [[ "$INSTALL_ALL" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
+if [[ "$INSTALL_METRICS" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
     echo "  ✓ metrics-server - Resource metrics for HPA"
+else
+    echo "  ✗ metrics-server - Not installed (add --with-metrics or -m to install)"
 fi
 echo ""
 echo "Next steps:"
@@ -422,15 +425,19 @@ echo "  1. Verify CNI is working:"
 echo "     kubectl run test --image=nginx --restart=Never"
 echo "     kubectl get pods -o wide"
 echo ""
-echo "  2. Verify HPA works:"
-echo "     kubectl autoscale deployment my-app --cpu-percent=50 --min=1 --max=10"
-echo ""
 if [[ "$CNI_CHOICE" == "cilium" ]]; then
-    echo "  3. Access Hubble UI (Cilium observability):"
-    echo "     kubectl port-forward -n kube-system svc/hubble-ui 8080:80"
+    echo "  2. Check Cilium status:"
+    echo "     cilium status"
+    echo ""
+    echo "  3. Install metrics-server for HPA (optional):"
+    echo "     $0 -m"
+    echo ""
+    echo "  4. Install Istio with Envoy Gateway (optional):"
+    echo "     ./scripts/istio-install.sh"
+    echo ""
+else
+    echo "  2. Install metrics-server for HPA:"
+    echo "     $0 -m"
     echo ""
 fi
-echo "  4. Install Istio with Envoy Gateway (next step):"
-echo "     ./scripts/istio-install.sh"
-echo ""
 echo "=== Components Installation Complete ==="

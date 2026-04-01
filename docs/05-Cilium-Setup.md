@@ -1,200 +1,174 @@
 # Cilium CNI Setup with Talos Linux
 
-This document describes how to enable Cilium CNI support in the Talos cluster.
+This document describes how to install Cilium CNI with kube-proxy replacement on a Talos Linux cluster.
 
 ## Overview
 
-Cilium requires specific configuration when running on Talos Linux due to the operating system's unique design:
+Cilium is an eBPF-based CNI that provides:
+- **High-performance networking** using eBPF
+- **kube-proxy replacement** for better scalability
+- **Network policies** for security
+- **Hubble** for observability (optional)
+- **Service mesh** capabilities (optional)
 
-1. **Disable Default CNI**: Talos includes Flannel by default, which must be disabled
-2. **Kube-proxy Replacement**: Cilium replaces kube-proxy for better performance
-3. **SYS_MODULE Capability**: Must be dropped (Talos doesn't allow kernel module loading)
-4. **Cgroup Configuration**: Must reuse Talos cgroupv2 mount
-5. **API Server Connectivity**: Use KubePrism proxy (localhost:7445)
-
-## Quick Start (Recommended)
+## Quick Start
 
 ```bash
-# 1. Clean up any existing cluster
-./scripts/vms-cleanup.sh -n
-
-# 2. Start VMs (Cilium-ready configs applied automatically)
+# 1. Start VMs
 ./scripts/vms-startup.sh
 
-# 3. Bootstrap cluster
+# 2. Bootstrap cluster
 ./scripts/talos-bootstrap.sh
 
-# 4. Install Cilium with Talos-specific settings
+# 3. Install Cilium with kube-proxy replacement
+./scripts/k8s-components.sh --cni-cilium
+
+# 4. (Optional) Remove metrics-server if not needed
+kubectl delete deployment metrics-server -n kube-system
+```
+
+## Installation Steps
+
+### Step 1: Bootstrap Talos Cluster
+
+First, ensure your Talos cluster is running:
+
+```bash
+# Start VMs
+./scripts/vms-startup.sh
+
+# Bootstrap Talos
+./scripts/talos-bootstrap.sh
+
+# Verify cluster is ready
+kubectl --kubeconfig talos-cluster/kubeconfig get nodes
+```
+
+### Step 2: Install Cilium
+
+The `k8s-components.sh` script handles Cilium installation:
+
+```bash
 ./scripts/k8s-components.sh --cni-cilium
 ```
 
-## Configuration Requirements
+This script:
+1. Installs Cilium CLI
+2. Deploys Cilium with kube-proxy replacement enabled
+3. Configures BPF masquerading
+4. Waits for Cilium to be ready
 
-### Talos Machine Config
-
-The following settings are required in `controlplane.yaml` and `worker.yaml`:
-
-```yaml
-machine:
-  network:
-    disableDefaultCNI: true  # Disable Flannel
-  kubelet:
-    defaultRuntimeSeccompProfileEnabled: false  # Allow Cilium capabilities
-  features:
-    kubePrism:
-      enabled: true  # Local proxy on port 7445
-      port: 7445
-    kubernetesTalosAPIAccess:
-      enabled: true
-      allowedRoles:
-        - os:reader
-      allowedKubernetesNamespaces:
-        - kube-system
-```
-
-### Cilium Helm Values for Talos
-
-```yaml
-kubeProxyReplacement: true
-cgroup:
-  autoMount:
-    enabled: false
-  hostRoot: /sys/fs/cgroup
-k8sServiceHost: localhost
-k8sServicePort: 7445  # KubePrism port
-securityContext:
-  capabilities:
-    ciliumAgent:
-      - CHOWN
-      - KILL
-      - NET_ADMIN
-      - NET_RAW
-      - IPC_LOCK
-      - SYS_ADMIN
-      - SYS_RESOURCE
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-    # Note: SYS_MODULE intentionally omitted for Talos
-```
-
-## Manual Setup
-
-If automatic setup fails, you can apply configs manually:
+### Step 3: Verify Installation
 
 ```bash
-# 1. Start VMs and wait for maintenance mode
-./scripts/vms-startup.sh
-
-# 2. IMMEDIATELY apply configs (within 30 seconds)
-talosctl apply-config --nodes 10.0.0.10 \
-  --file talos-cluster/controlplane.yaml \
-  --insecure
-
-talosctl apply-config --nodes 10.0.0.11 \
-  --file talos-cluster/worker.yaml \
-  --insecure
-
-talosctl apply-config --nodes 10.0.0.12 \
-  --file talos-cluster/worker.yaml \
-  --insecure
-
-# 3. Wait for install and reboot
-# 4. Bootstrap
-./scripts/talos-bootstrap.sh
-
-# 5. Install Cilium
-helm install cilium cilium/cilium \
-  --namespace kube-system \
-  --version 1.16.0 \
-  --set ipam.mode=kubernetes \
-  --set kubeProxyReplacement=true \
-  --set bpf.masquerade=true \
-  --set routingMode=native \
-  --set hubble.enabled=true \
-  --set hubble.relay.enabled=true \
-  --set hubble.ui.enabled=true
-```
-
-## Verification
-
-```bash
-# Check Cilium pods
-kubectl get pods -n kube-system -l k8s-app=cilium
-
 # Check Cilium status
-cilium status
+cilium status --kubeconfig talos-cluster/kubeconfig
 
-# Check Hubble
-kubectl get pods -n kube-system -l k8s-app=hubble-relay
+# Check Cilium pods
+kubectl --kubeconfig talos-cluster/kubeconfig get pods -n kube-system -l k8s-app=cilium
 
-# Access Hubble UI
-kubectl port-forward -n kube-system svc/hubble-ui 8080:80
-# Open http://localhost:8080
+# Check nodes
+kubectl --kubeconfig talos-cluster/kubeconfig get nodes
+```
+
+Expected output:
+```
+    /¯¯\
+ /¯¯\__/¯¯\    Cilium:         OK
+ \__/¯¯\__/    Operator:       OK
+ /¯¯\__/¯¯\    Envoy:          OK
+ \__/¯¯\__/    Hubble Relay:   disabled
+    \__/       ClusterMesh:    disabled
+```
+
+## Configuration
+
+### Default Settings
+
+The installation uses these defaults:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `kubeProxyReplacement` | `true` | Replace kube-proxy with eBPF |
+| `bpf.masquerade` | `true` | Enable BPF-based NAT |
+| `ipam.mode` | `kubernetes` | Use Kubernetes IPAM |
+| `securityContext.privileged` | `true` | Required for Talos |
+| `hubble.enabled` | `false` | Disabled by default |
+
+### Enable Hubble (Optional)
+
+For observability, enable Hubble:
+
+```bash
+cilium hubble enable --kubeconfig talos-cluster/kubeconfig
+cilium hubble ui --kubeconfig talos-cluster/kubeconfig
+```
+
+Access the UI at `http://localhost:12000`
+
+## kube-proxy Replacement
+
+Cilium replaces kube-proxy using eBPF. This provides:
+
+- **Better performance**: Direct packet forwarding
+- **Lower latency**: No iptables overhead
+- **Better scalability**: Handles more services/endpoints
+
+### Verify kube-proxy is Replaced
+
+```bash
+# Check kube-proxy pods (should be gone)
+kubectl --kubeconfig talos-cluster/kubeconfig get pods -n kube-system -l k8s-app=kube-proxy
+
+# Check Cilium config
+cilium config view --kubeconfig talos-cluster/kubeconfig | grep kube-proxy-replacement
 ```
 
 ## Troubleshooting
 
-### Cilium Pods CrashLoopBackOff
-
-**Error:** `unable to apply caps: can't apply capabilities: operation not permitted`
-
-**Cause:** Talos security settings don't allow required capabilities.
-
-**Solution:** The configs must be applied BEFORE Talos installs to disk. If Talos already installed with default settings, you must:
-
-1. Delete VM disks: `virsh vol-delete --pool talos-pool <disk-name>`
-2. Restart VMs: `./scripts/vms-startup.sh`
-3. Apply configs immediately (within 30 seconds)
-
-### Config Apply Too Late
-
-If you see `PermissionDenied` when applying configs, Talos has already installed to disk with default settings.
-
-**Solution:** Delete disks and restart:
+### Cilium Pods Not Ready
 
 ```bash
-virsh -c qemu:///system vol-delete --pool talos-pool with-agent-qwen_talos-master-vda.qcow2
-virsh -c qemu:///system vol-delete --pool talos-pool with-agent-qwen_talos-worker-1-vda.qcow2
-virsh -c qemu:///system vol-delete --pool talos-pool with-agent-qwen_talos-worker-2-vda.qcow2
-./scripts/vms-startup.sh
+# Check pod status
+kubectl --kubeconfig talos-cluster/kubeconfig get pods -n kube-system -l k8s-app=cilium
+
+# Check logs
+kubectl --kubeconfig talos-cluster/kubeconfig logs -n kube-system -l k8s-app=cilium
+
+# Check events
+kubectl --kubeconfig talos-cluster/kubeconfig describe pods -n kube-system -l k8s-app=cilium
 ```
 
-## Fallback: Flannel CNI
-
-If Cilium doesn't work, Flannel is available as a fallback:
+### Network Connectivity Issues
 
 ```bash
-# After bootstrap, install Flannel instead
-kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+# Test DNS
+kubectl --kubeconfig talos-cluster/kubeconfig run -it --rm dns-test --image=busybox:1.36 --restart=Never -- nslookup kubernetes.default
+
+# Test connectivity
+kubectl --kubeconfig talos-cluster/kubeconfig run -it --rm test --image=busybox:1.36 --restart=Never -- wget -qO- http://kubernetes.default
 ```
 
-Flannel works with default Talos security settings and doesn't require special configuration.
+### Reinstall Cilium
 
-## Configuration Files
+```bash
+# Uninstall
+cilium uninstall --kubeconfig talos-cluster/kubeconfig --wait
 
-### controlplane.yaml (Cilium-ready settings)
-
-```yaml
-machine:
-  kubelet:
-    defaultRuntimeSeccompProfileEnabled: false  # Required for Cilium
-  features:
-    kubernetesTalosAPIAccess:
-      enabled: true  # Required for Cilium
-      allowedRoles:
-        - os:reader
-      allowedKubernetesNamespaces:
-        - kube-system
+# Reinstall
+./scripts/k8s-components.sh --cni-cilium
 ```
 
-### worker.yaml (Cilium-ready settings)
+## Switching from Flannel
 
-```yaml
-machine:
-  kubelet:
-    defaultRuntimeSeccompProfileEnabled: false  # Required for Cilium
+If you have Flannel installed and want to switch to Cilium:
+
+```bash
+# Remove Flannel
+kubectl --kubeconfig talos-cluster/kubeconfig delete -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+
+# Install Cilium
+./scripts/k8s-components.sh --cni-cilium
 ```
 
 ## Resources

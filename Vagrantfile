@@ -64,8 +64,7 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
     vm.vm.network :private_network,
                   type: 'dhcp',
                   mac: mac_address,
-                  libvirt__network_name: ENV['NETWORK_NAME'] || "cluster-talos-net",
-                  libvirt__management_network_disabled: true
+                  libvirt__network_name: ENV['NETWORK_NAME'] || "cluster-talos-net"
 
     # Libvirt provider configuration
     vm.vm.provider :libvirt do |domain|
@@ -77,14 +76,21 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
       # Raw image mode - use pre-installed disk image
       # Vagrant will create the disk in the storage pool
       if ENV['USE_RAW_IMAGE'] == 'true'
+        # CDROM with Talos ISO (boot first for installation)
+        domain.storage :file,
+                       device: :cdrom,
+                       path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
         # For raw image mode, we create a volume from the raw image
         # The startup script handles creating CoW overlays in the pool
         domain.storage :file,
                        size: "#{disk_size_gb}G",
                        bus: 'virtio',
-                       cache: 'none'
+                       cache: 'none',
+                       type: 'raw'
+        # Boot order: CDROM first (for install), then disk (for normal operation)
+        domain.boot 'cdrom'
         domain.boot 'hd'
-        
+
       # ISO-based installation (traditional)
       elsif ENV['USE_BOX'] != 'true'
         # CDROM with Talos ISO (boot first for installation)
@@ -95,11 +101,12 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
         domain.storage :file,
                        size: "#{disk_size_gb}G",
                        bus: 'virtio',
-                       cache: 'none'
+                       cache: 'none',
+                       type: 'raw'
         # Boot order: CDROM first (for install), then disk (for normal operation)
         domain.boot 'cdrom'
         domain.boot 'hd'
-        
+
       # Using Vagrant box
       else
         domain.storage :file,
