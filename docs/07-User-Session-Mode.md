@@ -310,3 +310,27 @@ export LIBVIRT_URI=qemu:///system
 - [Libvirt URI Formats](https://libvirt.org/uri.html)
 - [Libvirt Session vs System](https://wiki.libvirt.org/page/FAQ#What_is_the_difference_between_system_and_session_QEMU_instances.3F)
 - [QEMU User Session](https://wiki.qemu.org/Documentation/UsbAssignment)
+
+## Known Limitations
+
+### Network Creation in Session Mode
+
+**Issue:** Libvirt session mode requires permission to create network bridge interfaces, which is typically not granted to regular users.
+
+**Error:** `error creating bridge interface virbr1: Operation not permitted`
+
+**Workaround:** Use system mode (`qemu:///system`) for full networking support, or configure polkit rules to allow network creation:
+
+```bash
+# Create polkit rule (requires admin access)
+sudo cat > /etc/polkit-1/rules.d/50-libvirt-networks.rules <<'POLKIT'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.libvirt.unix.network.create" &&
+        subject.isInGroup("libvirt")) {
+        return polkit.Result.YES;
+    }
+});
+POLKIT
+```
+
+**Recommendation:** For most users, system mode (`qemu:///system`) is recommended as it provides full networking without additional configuration.

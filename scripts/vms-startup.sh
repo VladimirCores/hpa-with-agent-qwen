@@ -109,8 +109,10 @@ step_04_prepare_storage() {
 }
 
 step_04_create_storage_pool() {
+    # Don't pass POOL_PATH - let script auto-detect based on LIBVIRT_URI mode
+    # Session mode: $HOME/.local/share/libvirt/$STORAGE_POOL
+    # System mode: /var/lib/libvirt/$STORAGE_POOL
     STORAGE_POOL="$STORAGE_POOL" \
-    POOL_PATH="$POOL_PATH" \
     LIBVIRT_URI="$LIBVIRT_URI" \
     bash "$STEPS_DIR/04-create-storage-pool.sh"
 }
@@ -118,6 +120,7 @@ step_04_create_storage_pool() {
 step_05_setup_network() {
     NETWORK_NAME="$NETWORK_NAME" \
     SCRIPT_DIR="$SCRIPT_DIR" \
+    LIBVIRT_URI="$LIBVIRT_URI" \
     bash "$STEPS_DIR/05-setup-network.sh"
 }
 

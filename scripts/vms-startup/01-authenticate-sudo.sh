@@ -1,6 +1,7 @@
 #!/bin/bash
 # Step 01: Authenticate sudo
 # Authenticates sudo and caches credentials for the script duration
+# Skips authentication for session mode (qemu:///session)
 
 # Source common setup
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,13 +16,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/11] Authenticating sudo..."
-echo "  Sudo authentication required (cached during script run)..."
-sudo -v
-touch "$SUDO_CACHE_FILE"
-echo "  ✓ Sudo authenticated"
+# Check if session mode (no sudo required)
+if [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
+    echo "[1/11] Session mode detected - skipping sudo authentication"
+    echo "  ✓ Running as user session"
+    
+    # Fix .vagrant directory permissions (no sudo needed)
+    echo "  Fixing .vagrant permissions..."
+    chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+    echo ""
+else
+    echo "[1/11] Authenticating sudo..."
+    echo "  Sudo authentication required (cached during script run)..."
+    sudo -v
+    touch "$SUDO_CACHE_FILE"
+    echo "  ✓ Sudo authenticated"
 
-# Fix .vagrant directory permissions BEFORE vagrant commands
-echo "  Fixing .vagrant permissions..."
-sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
-echo ""
+    # Fix .vagrant directory permissions BEFORE vagrant commands
+    echo "  Fixing .vagrant permissions..."
+    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+    echo ""
+fi

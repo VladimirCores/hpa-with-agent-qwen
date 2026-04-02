@@ -120,7 +120,30 @@ generate_static_hosts() {
 echo "Creating network definition..."
 STATIC_HOSTS=$(generate_static_hosts)
 
-NETWORK_XML=$(cat <<EOF
+# For session mode, don't specify bridge name (libvirt auto-creates)
+# For system mode, use the configured bridge name
+if [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
+    # Session mode: let libvirt auto-create bridge
+    NETWORK_XML=$(cat <<EOF
+<network>
+  <name>$NETWORK_NAME</name>
+  <forward mode='$FORWARD_MODE'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <ip address='$NETWORK_IP' netmask='$NETWORK_MASK'>
+    <dhcp>
+      <range start='$DHCP_START' end='$DHCP_END'/>
+$(echo -e "$STATIC_HOSTS")
+    </dhcp>
+  </ip>
+</network>
+EOF
+)
+else
+    # System mode: use configured bridge
+    NETWORK_XML=$(cat <<EOF
 <network>
   <name>$NETWORK_NAME</name>
   <forward mode='$FORWARD_MODE'>
@@ -138,6 +161,7 @@ $(echo -e "$STATIC_HOSTS")
 </network>
 EOF
 )
+fi
 
 # Define and start the network
 echo "Defining network '$NETWORK_NAME'..."
