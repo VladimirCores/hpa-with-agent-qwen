@@ -1,9 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Start Talos Cluster VMs
+# Start Talos Cluster VMs - Structured Step-by-Step Execution
 # =============================================================================
 # This script starts all Talos cluster VMs with proper cleanup and verification.
-# All steps run synchronously, waiting for each to complete before continuing.
+# Each step executes sequentially and must complete successfully before continuing.
 # Supports both ISO-based installation and raw disk image provisioning.
 # =============================================================================
 
@@ -14,13 +14,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 STEPS_DIR="$SCRIPT_DIR/vms-startup"
 
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 # Source .env file
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
     set -a
     source "$PROJECT_ROOT/.env"
     set +a
 else
-    echo "ERROR: .env file not found in $PROJECT_ROOT" >&2
+    echo -e "${RED}ERROR: .env file not found in $PROJECT_ROOT${NC}" >&2
     exit 1
 fi
 
@@ -29,8 +36,7 @@ export NETWORK_NAME MASTER_NAME MASTER_IP WORKER_COUNT
 export WORKER_NAME_PREFIX WORKER_IP_BASE STORAGE_POOL LIBVIRT_URI
 export SKIP_CLEANUP FORCE_RESET VERBOSE CLUSTER_NAME TALOS_IMAGE_URL TALOS_IMAGE_PATH
 export USE_RAW_IMAGE TALOS_RAW_IMAGE_PATH TALOS_RAW_IMAGE_COMPRESSED
-export SUDO_USER
-export MASTER_DISK WORKER_DISK
+export SUDO_USER MASTER_DISK WORKER_DISK FORWARD_MODE
 
 # Parse arguments
 SKIP_CLEANUP=false
@@ -50,27 +56,115 @@ while getopts "sfv" opt; do
     esac
 done
 
-echo "=== Talos Cluster VM Startup ==="
-echo ""
-echo "Configuration:"
-echo "  NETWORK_NAME: $NETWORK_NAME"
-echo "  MASTER_NAME: $MASTER_NAME ($MASTER_IP)"
-echo "  WORKER_COUNT: $WORKER_COUNT"
-echo "  USE_RAW_IMAGE: ${USE_RAW_IMAGE:-false}"
-echo "  SKIP_CLEANUP: $SKIP_CLEANUP"
-echo "  FORCE_RESET: $FORCE_RESET"
-echo "  VERBOSE: $VERBOSE"
-echo ""
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
-# Source helper functions
-source "$STEPS_DIR/00-helper-functions.sh"
-
-# Define step functions
-step_01_authenticate_sudo() {
-    bash "$STEPS_DIR/01-authenticate-sudo.sh"
+print_header() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  $1${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
 }
 
-step_02_check_prerequisites() {
+print_step() {
+    echo -e "${YELLOW}▶ Step $1: $2${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+run_step() {
+    local step_num="$1"
+    local step_name="$2"
+    local step_script="$3"
+    shift 3
+    
+    print_step "$step_num" "$step_name"
+    
+    if bash "$step_script" "$@"; then
+        print_success "$step_name completed"
+        return 0
+    else
+        print_error "$step_name failed"
+        echo ""
+        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${RED}  Startup failed at step $step_num: $step_name${NC}"
+        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo "Troubleshooting:"
+        echo "  1. Check the error message above"
+        echo "  2. Review logs in /tmp/vms-startup.log"
+        echo "  3. Run with -v for verbose output"
+        echo "  4. Fix the issue and re-run: $0"
+        echo ""
+        exit 1
+    fi
+}
+
+verify_step() {
+    local step_name="$1"
+    local verify_cmd="$2"
+    
+    echo "  Verifying: $step_name..."
+    
+    if eval "$verify_cmd" > /dev/null 2>&1; then
+        print_success "Verification passed: $step_name"
+        return 0
+    else
+        print_error "Verification failed: $step_name"
+        return 1
+    fi
+}
+
+# =============================================================================
+# Main Script
+# =============================================================================
+
+print_header "Talos Cluster VM Startup"
+
+echo "Configuration:"
+echo "  LIBVIRT_URI:    $LIBVIRT_URI"
+echo "  NETWORK_NAME:   $NETWORK_NAME"
+echo "  FORWARD_MODE:   ${FORWARD_MODE:-nat}"
+echo "  MASTER_NAME:    $MASTER_NAME ($MASTER_IP)"
+echo "  WORKER_COUNT:   $WORKER_COUNT"
+echo "  USE_RAW_IMAGE:  ${USE_RAW_IMAGE:-false}"
+echo "  STORAGE_POOL:   $STORAGE_POOL"
+echo "  POOL_PATH:      ${POOL_PATH:-auto}"
+echo ""
+echo "Options:"
+echo "  SKIP_CLEANUP:   $SKIP_CLEANUP"
+echo "  FORCE_RESET:    $FORCE_RESET"
+echo "  VERBOSE:        $VERBOSE"
+echo ""
+
+# Read confirmation for force reset
+if [[ "$FORCE_RESET" == "true" ]]; then
+    echo -e "${YELLOW}⚠ FORCE RESET MODE: This will destroy all VMs and disks!${NC}"
+    read -p "Continue? (yes/no): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+fi
+
+# =============================================================================
+# Step 1: Check Prerequisites
+# =============================================================================
+print_header "Step 1/8: Check Prerequisites"
+
+run_step "1" "Checking prerequisites" "$STEPS_DIR/02-check-prerequisites.sh" \
     NETWORK_NAME="$NETWORK_NAME" \
     MASTER_NAME="$MASTER_NAME" \
     MASTER_IP="$MASTER_IP" \
@@ -78,75 +172,107 @@ step_02_check_prerequisites() {
     WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
     WORKER_IP_BASE="$WORKER_IP_BASE" \
     STORAGE_POOL="$STORAGE_POOL" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/02-check-prerequisites.sh"
-}
+    LIBVIRT_URI="$LIBVIRT_URI"
 
-step_03_prepare_image() {
-    if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+# =============================================================================
+# Step 2: Prepare Talos Image
+# =============================================================================
+print_header "Step 2/8: Prepare Talos Image"
+
+if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+    run_step "2" "Preparing raw disk image" "$STEPS_DIR/03-prepare-raw-image.sh" \
         TALOS_RAW_IMAGE_URL="$TALOS_RAW_IMAGE_URL" \
         TALOS_RAW_IMAGE_PATH="$TALOS_RAW_IMAGE_PATH" \
-        TALOS_RAW_IMAGE_COMPRESSED="$TALOS_RAW_IMAGE_COMPRESSED" \
-        bash "$STEPS_DIR/03-prepare-raw-image.sh"
-    else
+        TALOS_RAW_IMAGE_COMPRESSED="$TALOS_RAW_IMAGE_COMPRESSED"
+else
+    run_step "2" "Preparing ISO image" "$STEPS_DIR/03-prepare-iso.sh" \
         TALOS_IMAGE_URL="$TALOS_IMAGE_URL" \
-        TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
-        bash "$STEPS_DIR/03-prepare-iso.sh"
-    fi
-}
+        TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH"
+fi
 
-step_04_prepare_storage() {
-    if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
-        FORCE_RESET="$FORCE_RESET" \
-        PROJECT_ROOT="$PROJECT_ROOT" \
-        bash "$STEPS_DIR/04-create-vm-disks.sh"
-    else
+# =============================================================================
+# Step 3: Create Storage Pool
+# =============================================================================
+print_header "Step 3/8: Create Storage Pool"
+
+run_step "3" "Creating storage pool" "$STEPS_DIR/04-create-storage-pool.sh" \
+    STORAGE_POOL="$STORAGE_POOL" \
+    LIBVIRT_URI="$LIBVIRT_URI"
+
+# Verify storage pool
+verify_step "Storage pool exists" \
+    "virsh -c '$LIBVIRT_URI' pool-info '$STORAGE_POOL'"
+
+# =============================================================================
+# Step 4: Setup Network
+# =============================================================================
+print_header "Step 4/8: Setup Network"
+
+run_step "4" "Setting up network" "$STEPS_DIR/05-setup-network.sh" \
+    NETWORK_NAME="$NETWORK_NAME" \
+    SCRIPT_DIR="$SCRIPT_DIR"
+
+# Verify network
+sleep 2
+verify_step "Network is active" \
+    "virsh -c '$LIBVIRT_URI' net-info '$NETWORK_NAME' 2>/dev/null | grep -q 'Active.*yes'"
+
+# =============================================================================
+# Step 5: Cleanup Existing VMs (if not skipped)
+# =============================================================================
+if [[ "$SKIP_CLEANUP" != "true" ]]; then
+    print_header "Step 5/8: Cleanup Existing VMs"
+    
+    run_step "5" "Cleaning up existing VMs" "$STEPS_DIR/06-cleanup-vms.sh" \
+        SKIP_CLEANUP="$SKIP_CLEANUP" \
+        NETWORK_NAME="$NETWORK_NAME" \
+        MASTER_NAME="$MASTER_NAME" \
+        WORKER_COUNT="$WORKER_COUNT" \
+        WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
         STORAGE_POOL="$STORAGE_POOL" \
-        TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
         LIBVIRT_URI="$LIBVIRT_URI" \
-        bash "$STEPS_DIR/04-copy-iso-to-pool.sh"
+        USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
+        PROJECT_ROOT="$PROJECT_ROOT"
+else
+    print_header "Step 5/8: Skip Cleanup (requested)"
+    print_success "Skipping VM cleanup"
+fi
+
+# =============================================================================
+# Step 6: Start VMs with Vagrant
+# =============================================================================
+print_header "Step 6/8: Start VMs"
+
+cd "$PROJECT_ROOT"
+
+echo "Starting VMs with Vagrant..."
+if vagrant up --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
+    print_success "VMs started successfully"
+else
+    print_error "Vagrant failed to start VMs"
+    echo ""
+    echo "Check /tmp/vagrant-up.log for details"
+    exit 1
+fi
+
+# Verify VMs are running
+echo ""
+echo "Verifying VMs..."
+for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
+    if virsh -c "$LIBVIRT_URI" domstate "with-agent-qwen_$vm" 2>/dev/null | grep -q "running"; then
+        print_success "VM $vm is running"
+    else
+        print_error "VM $vm is not running"
+        exit 1
     fi
-}
+done
 
-step_04_create_storage_pool() {
-    # Don't pass POOL_PATH - let script auto-detect based on LIBVIRT_URI mode
-    # Session mode: $HOME/.local/share/libvirt/$STORAGE_POOL
-    # System mode: /var/lib/libvirt/$STORAGE_POOL
-    STORAGE_POOL="$STORAGE_POOL" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/04-create-storage-pool.sh"
-}
+# =============================================================================
+# Step 7: Configure UEFI (if needed)
+# =============================================================================
+print_header "Step 7/8: Configure UEFI"
 
-step_05_setup_network() {
-    NETWORK_NAME="$NETWORK_NAME" \
-    SCRIPT_DIR="$SCRIPT_DIR" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/05-setup-network.sh"
-}
-
-step_06_cleanup_vms() {
-    SKIP_CLEANUP="$SKIP_CLEANUP" \
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    STORAGE_POOL="$STORAGE_POOL" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
-    PROJECT_ROOT="$PROJECT_ROOT" \
-    bash "$STEPS_DIR/06-cleanup-vms.sh"
-}
-
-step_07_start_vms() {
-    SKIP_CLEANUP="$SKIP_CLEANUP" \
-    FORCE_RESET="$FORCE_RESET" \
-    PROJECT_ROOT="$PROJECT_ROOT" \
-    bash "$STEPS_DIR/07-start-vms.sh"
-}
-
-step_08b_configure_uefi() {
-    # Configure UEFI firmware for Talos VMs
-    # This MUST run before Talos can boot from ISO
+run_step "7" "Configuring UEFI" "$STEPS_DIR/08b-configure-uefi.sh" \
     NETWORK_NAME="$NETWORK_NAME" \
     MASTER_NAME="$MASTER_NAME" \
     MASTER_MEMORY="$MASTER_MEMORY" \
@@ -157,105 +283,35 @@ step_08b_configure_uefi() {
     WORKER_CPUS="$WORKER_CPUS" \
     POOL_PATH="$POOL_PATH" \
     LIBVIRT_URI="$LIBVIRT_URI" \
-    TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH" \
-    bash "$STEPS_DIR/08b-configure-uefi.sh"
-}
+    TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH"
 
-step_08_wait_for_talos() {
-    # Source the step script directly to preserve environment
-    source "$STEPS_DIR/08-wait-for-talos.sh"
-}
+# =============================================================================
+# Step 8: Wait for Talos to Boot
+# =============================================================================
+print_header "Step 8/8: Wait for Talos Boot"
 
-step_08b_apply_cilium_configs() {
-    # Apply Cilium-ready configs immediately after Talos boots
-    # This MUST run before Talos installs to disk
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    MASTER_IP="$MASTER_IP" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    WORKER_IP_BASE="$WORKER_IP_BASE" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    PROJECT_ROOT="$PROJECT_ROOT" \
-    bash "$STEPS_DIR/08b-apply-cilium-configs.sh"
-}
-
-step_09_disable_boot_menu() {
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/09-disable-boot-menu.sh"
-}
-
-step_10_reboot_verify() {
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    bash "$STEPS_DIR/10-reboot-verify.sh"
-}
-
-step_11_summary() {
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
+run_step "8" "Waiting for Talos boot" "$STEPS_DIR/08-wait-for-talos.sh" \
     MASTER_IP="$MASTER_IP" \
     WORKER_COUNT="$WORKER_COUNT" \
     WORKER_IP_BASE="$WORKER_IP_BASE" \
-    CLUSTER_NAME="${CLUSTER_NAME:-talos-cluster}" \
-    USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
-    bash "$STEPS_DIR/11-summary.sh"
-}
+    LIBVIRT_URI="$LIBVIRT_URI"
 
-# Execute steps
-echo "Executing steps..."
+# =============================================================================
+# Summary
+# =============================================================================
+print_header "Startup Complete"
+
+echo -e "${GREEN}All VMs started successfully!${NC}"
+echo ""
+echo "Next steps:"
+echo "  1. Bootstrap Talos cluster:"
+echo "     ./scripts/talos-bootstrap.sh"
+echo ""
+echo "  2. Monitor VM status:"
+echo "     virsh -c $LIBVIRT_URI list"
+echo ""
+echo "  3. Access VM console (if needed):"
+echo "     virsh -c $LIBVIRT_URI console with-agent-qwen_$MASTER_NAME"
 echo ""
 
-# Execute a step synchronously
-run_step_sync() {
-    local step_name="$1"
-    local step_func="$2"
-
-    echo "Starting: $step_name"
-
-    if $step_func; then
-        echo "  ✓ Completed"
-    else
-        echo "  ✗ Failed"
-        exit 1
-    fi
-    echo ""
-}
-
-# Steps 01-09: Run synchronously
-run_step_sync "01: Authenticate sudo" "step_01_authenticate_sudo"
-run_step_sync "02: Check prerequisites" "step_02_check_prerequisites"
-run_step_sync "03: Prepare disk image" "step_03_prepare_image"
-run_step_sync "04: Create storage pool" "step_04_create_storage_pool"
-run_step_sync "05: Setup network" "step_05_setup_network"
-run_step_sync "06: Cleanup VMs" "step_06_cleanup_vms"
-run_step_sync "07: Start VMs" "step_07_start_vms"
-run_step_sync "07b: Create CoW overlays" "step_04_prepare_storage"
-run_step_sync "08: Configure UEFI" "step_08b_configure_uefi"
-run_step_sync "09: Disable boot menu" "step_09_disable_boot_menu"
-
-# Step 10: Wait for Talos (source directly to preserve sudo context)
-echo "Starting: 10: Wait for Talos boot"
-step_08_wait_for_talos
-echo "  ✓ Completed"
-echo ""
-
-# Step 10b: Apply Cilium configs (CRITICAL - must run before Talos installs)
-echo "Starting: 10b: Apply Cilium-Ready Configs"
-step_08b_apply_cilium_configs
-echo "  ✓ Completed"
-echo ""
-
-# Steps 09-11: Run synchronously
-run_step_sync "09: Disable boot menu" "step_09_disable_boot_menu"
-run_step_sync "10: Reboot and verify" "step_10_reboot_verify"
-run_step_sync "11: Summary" "step_11_summary"
-
-echo "=== VM Startup Complete ==="
+exit 0

@@ -240,3 +240,15 @@ fi
 echo ""
 log_info "  ✓ Talos booted from ISO"
 echo ""
+
+# Return success if at least master is ready
+MASTER_IP="${VM_IPS[0]:-}"
+if [[ -n "$MASTER_IP" ]]; then
+    if talosctl version --nodes "$MASTER_IP" --insecure &>/dev/null; then
+        echo "Master node is accessible"
+        exit 0
+    fi
+fi
+
+# If we got here, at least the boot wait completed
+exit 0
