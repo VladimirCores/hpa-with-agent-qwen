@@ -120,10 +120,23 @@ generate_static_hosts() {
 echo "Creating network definition..."
 STATIC_HOSTS=$(generate_static_hosts)
 
-# For session mode, don't specify bridge name (libvirt auto-creates)
-# For system mode, use the configured bridge name
-if [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
-    # Session mode: let libvirt auto-create bridge
+# For bridge mode, use existing bridge interface (no DHCP, no IP - bridge handles it)
+# For NAT mode in session mode, don't specify bridge (libvirt creates virbrX)
+# For NAT mode in system mode, use configured bridge name
+if [[ "$FORWARD_MODE" == "bridge" ]]; then
+    # Bridge mode: use existing bridge interface (no IP/DHCP - bridge handles networking)
+    NETWORK_XML=$(cat <<EOF
+<network>
+  <name>$NETWORK_NAME</name>
+  <forward mode='bridge'/>
+  <bridge name='$BRIDGE_NAME'/>
+</network>
+EOF
+)
+    echo "  Using bridge mode with existing interface: $BRIDGE_NAME"
+    echo "  Note: DHCP reservations handled by bridge, not libvirt network"
+elif [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
+    # Session mode with NAT: let libvirt auto-create bridge
     NETWORK_XML=$(cat <<EOF
 <network>
   <name>$NETWORK_NAME</name>
@@ -141,8 +154,9 @@ $(echo -e "$STATIC_HOSTS")
 </network>
 EOF
 )
+    echo "  Using NAT mode (libvirt will create bridge)"
 else
-    # System mode: use configured bridge
+    # System mode with NAT: use configured bridge
     NETWORK_XML=$(cat <<EOF
 <network>
   <name>$NETWORK_NAME</name>
@@ -161,6 +175,7 @@ $(echo -e "$STATIC_HOSTS")
 </network>
 EOF
 )
+    echo "  Using NAT mode with bridge: $BRIDGE_NAME"
 fi
 
 # Define and start the network
