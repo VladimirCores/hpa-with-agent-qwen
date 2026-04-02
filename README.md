@@ -59,20 +59,25 @@ See [docs/07-User-Session-Mode.md](docs/07-User-Session-Mode.md) for details.
 cp .env.example .env
 ```
 
-### Step 2: Start VMs
+### Step 2: Start Cluster
 
 ```bash
-# Start all VMs
-./scripts/vms-startup.sh
+# Start all VMs (step-by-step with verification)
+./startup.sh
+
+# Options:
+#   -s  Skip cleanup (don't stop existing VMs)
+#   -f  Force reset (destroy VMs and disks)
+#   -v  Verbose output
 ```
 
-**Wait time:** ~3-5 minutes (raw image mode with CoW overlays)
+**Wait time:** ~5-7 minutes (VMs boot from ISO)
 
 ### Step 3: Bootstrap Talos Cluster
 
 ```bash
 # Bootstrap Talos and Kubernetes
-./scripts/talos-bootstrap.sh
+./bootstrap.sh
 ```
 
 **Wait time:** ~2-3 minutes
@@ -80,19 +85,21 @@ cp .env.example .env
 ### Step 4: Install Cilium CNI
 
 ```bash
-# Install Cilium with kube-proxy replacement (default)
+# Install Cilium with kube-proxy replacement
 ./scripts/k8s-components.sh
-
-# Or install with metrics-server for HPA
-./scripts/k8s-components.sh -m
 ```
 
-**What this does:**
-- Installs Cilium CNI (eBPF-based networking)
-- Enables kube-proxy replacement (BPF-based service routing)
-- Optionally installs metrics-server for HPA
-
 **Wait time:** ~2-3 minutes
+
+### Cleanup
+
+```bash
+# Stop VMs (preserve network and storage)
+./cleanup.sh
+
+# Full cleanup (destroy network and storage)
+./cleanup.sh -f
+```
 
 ### Step 5: Verify Cluster
 
