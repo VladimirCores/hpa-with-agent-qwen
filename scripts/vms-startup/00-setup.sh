@@ -23,11 +23,14 @@ fi
 # Set LIBVIRT_URI if not set
 LIBVIRT_URI="${LIBVIRT_URI:-qemu:///system}"
 
-# Don't set POOL_PATH here - let storage pool script auto-detect based on mode
-# Session mode: $HOME/.local/share/libvirt/$STORAGE_POOL
-# System mode: /var/lib/libvirt/$STORAGE_POOL
+# Set POOL_PATH based on mode if not already set
+# Default: project-local storage (portable, works for both modes)
+if [[ -z "${POOL_PATH:-}" ]]; then
+    # Use project-local storage by default (recommended)
+    POOL_PATH="$PROJECT_ROOT/.vagrant/storage-pool"
+fi
 
-# Export common variables (excluding POOL_PATH)
+# Export common variables
 export STEP_DIR
 export PROJECT_ROOT
 export LIBVIRT_URI
@@ -38,3 +41,4 @@ export WORKER_COUNT
 export WORKER_NAME_PREFIX
 export WORKER_IP_BASE
 export STORAGE_POOL
+export POOL_PATH

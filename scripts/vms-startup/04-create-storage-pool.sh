@@ -2,6 +2,7 @@
 # Step 04: Create libvirt storage pool
 # Creates the storage pool if it doesn't exist (for both ISO and raw image modes)
 # Supports both system mode (qemu:///system) and session mode (qemu:///session)
+# Default: project-local storage (portable, no sudo required)
 
 # Source common setup
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,21 +10,10 @@ source "$STEP_DIR/00-setup.sh"
 
 echo "[4/12] Creating storage pool..."
 
-# Determine if using session mode
-IS_SESSION_MODE=false
-if [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
-    IS_SESSION_MODE=true
-fi
-
-# Use POOL_PATH from .env or default based on mode
-if [[ -z "${POOL_PATH:-}" ]]; then
-    if [[ "$IS_SESSION_MODE" == "true" ]]; then
-        # Session mode: use user's local libvirt storage
-        POOL_PATH="$HOME/.local/share/libvirt/$STORAGE_POOL"
-    else
-        # System mode: use system storage
-        POOL_PATH="/var/lib/libvirt/$STORAGE_POOL"
-    fi
+# Determine if using project-local storage
+IS_PROJECT_LOCAL=false
+if [[ "$POOL_PATH" == *".vagrant/storage-pool"* ]] || [[ "$POOL_PATH" == "$PROJECT_ROOT"* ]]; then
+    IS_PROJECT_LOCAL=true
 fi
 
 # Expand ~ to home directory if needed
@@ -34,15 +24,22 @@ if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
     echo "  Storage pool '$STORAGE_POOL' not found. Creating..."
 
     # Create pool directory
-    if [[ "$IS_SESSION_MODE" == "true" ]]; then
-        # Session mode: no sudo needed, user owns the directory
+    if [[ "$IS_PROJECT_LOCAL" == "true" ]]; then
+        # Project-local storage: no sudo needed, user owns the directory
         mkdir -p "$POOL_PATH"
         chmod 755 "$POOL_PATH"
+        echo "  Using project-local storage: $POOL_PATH"
+    elif [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
+        # Session mode: use user's local libvirt storage
+        mkdir -p "$POOL_PATH"
+        chmod 755 "$POOL_PATH"
+        echo "  Using session storage: $POOL_PATH"
     else
         # System mode: requires sudo
         sudo mkdir -p "$POOL_PATH"
         sudo chown qemu:kvm "$POOL_PATH"
         sudo chmod 755 "$POOL_PATH"
+        echo "  Using system storage: $POOL_PATH"
     fi
 
     # Create pool XML

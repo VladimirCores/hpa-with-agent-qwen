@@ -182,9 +182,17 @@ if [[ "$FULL_CLEANUP" == "true" ]]; then
         virsh -c "$LIBVIRT_URI" pool-undefine "$STORAGE_POOL" 2>/dev/null || true
         echo "    ✓ Storage pool removed"
     fi
-    
+
+    # For project-local storage, clean up the directory
+    if [[ "$POOL_PATH" == *".vagrant/storage-pool"* ]] || [[ "$POOL_PATH" == "$PROJECT_ROOT"* ]]; then
+        POOL_PATH="${POOL_PATH/#\~/$HOME}"
+        if [[ -d "$POOL_PATH" ]]; then
+            echo "  Removing project-local storage directory: $POOL_PATH"
+            rm -rf "$POOL_PATH"
+            echo "    ✓ Project storage directory removed"
+        fi
     # For session mode, also clean up the local directory
-    if [[ "$IS_SESSION_MODE" == "true" ]]; then
+    elif [[ "$IS_SESSION_MODE" == "true" ]]; then
         POOL_PATH="${POOL_PATH:-$HOME/.local/share/libvirt/$STORAGE_POOL}"
         POOL_PATH="${POOL_PATH/#\~/$HOME}"
         if [[ -d "$POOL_PATH" ]]; then

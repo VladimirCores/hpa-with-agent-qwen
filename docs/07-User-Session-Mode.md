@@ -1,29 +1,25 @@
 # User Session Mode for Talos Cluster
 
-This document explains how to run the Talos Kubernetes cluster in **user session mode** instead of system-wide KVM mode.
+This document explains the **user session mode** configuration for running the Talos Kubernetes cluster.
 
 ## Overview
 
-Libvirt supports two operation modes:
+This cluster runs **exclusively in user session mode** (`qemu:///session`). This means:
 
-| Mode | URI | Description |
-|------|-----|-------------|
-| **System** | `qemu:///system` | System-wide, requires sudo, full networking |
-| **Session** | `qemu:///session` | User-isolated, no sudo, NAT only |
+- ✅ **No sudo required** - All operations run as your user
+- ✅ **Project-local storage** - VM disks stored in `.vagrant/storage-pool/`
+- ✅ **User-isolated** - VMs only visible to your user session
+- ✅ **Portable** - Entire cluster in project folder
 
-## When to Use Session Mode
+## When NOT to Use This Setup
 
-**Use Session Mode if:**
-- ✅ You don't have sudo access
-- ✅ You want better security isolation
-- ✅ You want to avoid permission issues
-- ✅ You only need NAT networking
+This setup is **NOT suitable** if you need:
+- ❌ Bridged networking (VMs on physical network)
+- ❌ VMs accessible from other hosts
+- ❌ System-wide VM management
+- ❌ VMs that persist across user sessions
 
-**Use System Mode if:**
-- ✅ You need bridged networking
-- ✅ You need macvtap or direct network access
-- ✅ You want VMs accessible from other hosts
-- ✅ You need host device passthrough
+For those requirements, you need a different libvirt configuration.
 
 ## Quick Start (Session Mode)
 
@@ -75,11 +71,18 @@ NETWORK_CIDR=10.0.0.1/24
 
 ### Storage Locations
 
-| Resource | System Mode | Session Mode |
-|----------|-------------|--------------|
-| **VM Disks** | `/var/lib/libvirt/talos-pool/` | `~/.local/share/libvirt/talos-pool/` |
-| **Networks** | System libvirt | User libvirt |
-| **Configs** | System-wide | User-only |
+| Resource | System Mode | Session Mode | Project-Local (Default) |
+|----------|-------------|--------------|------------------------|
+| **VM Disks** | `/var/lib/libvirt/talos-pool/` | `~/.local/share/libvirt/talos-pool/` | `./.vagrant/storage-pool/` |
+| **Networks** | System libvirt | User libvirt | User/System libvirt |
+| **Configs** | System-wide | User-only | Project directory |
+
+**Project-local storage is recommended** because:
+- ✅ Portable (entire cluster in project folder)
+- ✅ No sudo required for storage operations
+- ✅ Easy cleanup (just delete `.vagrant/storage-pool/`)
+- ✅ Works with both system and session mode
+- ✅ No permission issues
 
 ## Networking in Session Mode
 

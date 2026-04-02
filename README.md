@@ -13,24 +13,25 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 - **kubectl** CLI for Kubernetes management
 - **helm** for component installation
 
-### Running Modes
+### Running Mode
 
-| Mode | Command | Sudo Required | Networking |
-|------|---------|---------------|------------|
-| **System** (default) | `LIBVIRT_URI=qemu:///system` | Yes | Full (bridged, NAT) |
-| **User Session** | `LIBVIRT_URI=qemu:///session` | No | NAT only |
+This cluster runs **exclusively in user session mode** (`qemu:///session`):
 
-See [docs/07-User-Session-Mode.md](docs/07-User-Session-Mode.md) for session mode details.
+| Feature | Value |
+|---------|-------|
+| **Mode** | User Session |
+| **Sudo Required** | No |
+| **Networking** | NAT only |
+| **Storage** | Project-local (`.vagrant/storage-pool/`) |
+| **Portability** | Full (entire cluster in project folder) |
+
+See [docs/07-User-Session-Mode.md](docs/07-User-Session-Mode.md) for details.
 
 ### Step 1: Configure Environment
 
 ```bash
-# Copy example environment file
+# Copy example environment file (pre-configured for session mode)
 cp .env.example .env
-
-# (Optional) Edit .env to customize settings
-# For user session mode (no sudo):
-#   LIBVIRT_URI=qemu:///session
 ```
 
 ### Step 2: Start VMs
