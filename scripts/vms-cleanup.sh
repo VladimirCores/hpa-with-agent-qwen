@@ -39,7 +39,7 @@ echo "=== Talos Cluster VM Cleanup ==="
 echo ""
 
 # =============================================================================
-# Step 1: Authenticate sudo (local cache, cleaned up on exit)
+# Step 1: Authenticate sudo (only for system mode)
 # =============================================================================
 SUDO_CACHE_FILE="$PROJECT_ROOT/.sudo_cache_$(whoami)"
 SUDO_CACHE_DURATION=900  # 15 minutes in seconds
@@ -50,15 +50,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/7] Authenticating sudo..."
-echo "  Sudo authentication required (cached during script run)..."
-sudo -v
-touch "$SUDO_CACHE_FILE"
-echo "  ✓ Sudo authenticated"
-
-# Fix .vagrant directory permissions BEFORE vagrant commands
-echo "  Fixing .vagrant permissions..."
-sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+# Only authenticate sudo for system mode (session mode doesn't need it)
+IS_SESSION_MODE=false
+if [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
+    IS_SESSION_MODE=true
+    echo "[1/7] Session mode detected - no sudo required"
+    echo "  ✓ Running as user session"
+else
+    echo "[1/7] Authenticating sudo..."
+    echo "  Sudo authentication required (cached during script run)..."
+    sudo -v
+    touch "$SUDO_CACHE_FILE"
+    echo "  ✓ Sudo authenticated"
+    
+    # Fix .vagrant directory permissions BEFORE vagrant commands
+    echo "  Fixing .vagrant permissions..."
+    sudo chown -R "$(whoami)":"$(whoami)" "$(pwd)/.vagrant" 2>/dev/null || true
+fi
 echo ""
 
 # =============================================================================
@@ -173,6 +181,17 @@ if [[ "$FULL_CLEANUP" == "true" ]]; then
         virsh -c "$LIBVIRT_URI" pool-destroy "$STORAGE_POOL" 2>/dev/null || true
         virsh -c "$LIBVIRT_URI" pool-undefine "$STORAGE_POOL" 2>/dev/null || true
         echo "    ✓ Storage pool removed"
+    fi
+    
+    # For session mode, also clean up the local directory
+    if [[ "$IS_SESSION_MODE" == "true" ]]; then
+        POOL_PATH="${POOL_PATH:-$HOME/.local/share/libvirt/$STORAGE_POOL}"
+        POOL_PATH="${POOL_PATH/#\~/$HOME}"
+        if [[ -d "$POOL_PATH" ]]; then
+            echo "  Removing session storage directory: $POOL_PATH"
+            rm -rf "$POOL_PATH"
+            echo "    ✓ Session storage directory removed"
+        fi
     fi
 fi
 

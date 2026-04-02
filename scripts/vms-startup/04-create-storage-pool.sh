@@ -1,6 +1,7 @@
 #!/bin/bash
 # Step 04: Create libvirt storage pool
 # Creates the storage pool if it doesn't exist (for both ISO and raw image modes)
+# Supports both system mode (qemu:///system) and session mode (qemu:///session)
 
 # Source common setup
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,20 +9,42 @@ source "$STEP_DIR/00-setup.sh"
 
 echo "[4/12] Creating storage pool..."
 
-# Use POOL_PATH from .env or default to /var/lib/libvirt/$STORAGE_POOL
-POOL_PATH="${POOL_PATH:-/var/lib/libvirt/$STORAGE_POOL}"
+# Determine if using session mode
+IS_SESSION_MODE=false
+if [[ "$LIBVIRT_URI" == "qemu:///session" ]]; then
+    IS_SESSION_MODE=true
+fi
+
+# Use POOL_PATH from .env or default based on mode
+if [[ -z "${POOL_PATH:-}" ]]; then
+    if [[ "$IS_SESSION_MODE" == "true" ]]; then
+        # Session mode: use user's local libvirt storage
+        POOL_PATH="$HOME/.local/share/libvirt/$STORAGE_POOL"
+    else
+        # System mode: use system storage
+        POOL_PATH="/var/lib/libvirt/$STORAGE_POOL"
+    fi
+fi
+
 # Expand ~ to home directory if needed
 POOL_PATH="${POOL_PATH/#\~/$HOME}"
 
 # Check if storage pool exists, create if needed
 if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
     echo "  Storage pool '$STORAGE_POOL' not found. Creating..."
-    
+
     # Create pool directory
-    sudo mkdir -p "$POOL_PATH"
-    sudo chown qemu:kvm "$POOL_PATH"
-    sudo chmod 755 "$POOL_PATH"
-    
+    if [[ "$IS_SESSION_MODE" == "true" ]]; then
+        # Session mode: no sudo needed, user owns the directory
+        mkdir -p "$POOL_PATH"
+        chmod 755 "$POOL_PATH"
+    else
+        # System mode: requires sudo
+        sudo mkdir -p "$POOL_PATH"
+        sudo chown qemu:kvm "$POOL_PATH"
+        sudo chmod 755 "$POOL_PATH"
+    fi
+
     # Create pool XML
     POOL_XML=$(cat <<EOF
 <pool type='dir'>
@@ -32,7 +55,7 @@ if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
 </pool>
 EOF
 )
-    
+
     # Define and start the pool
     echo "$POOL_XML" | virsh -c "$LIBVIRT_URI" pool-define /dev/stdin
     virsh -c "$LIBVIRT_URI" pool-start "$STORAGE_POOL"
@@ -40,7 +63,7 @@ EOF
     echo "  ✓ Storage pool created at $POOL_PATH"
 else
     echo "  ✓ Storage pool '$STORAGE_POOL' exists"
-    
+
     # Verify pool path matches expected
     ACTUAL_PATH=$(virsh -c "$LIBVIRT_URI" pool-dumpxml "$STORAGE_POOL" 2>/dev/null | grep "<path>" | sed 's/.*<path>\(.*\)<\/path>.*/\1/')
     if [[ "$ACTUAL_PATH" != "$POOL_PATH" ]]; then

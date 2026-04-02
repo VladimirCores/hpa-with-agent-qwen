@@ -13,6 +13,15 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 - **kubectl** CLI for Kubernetes management
 - **helm** for component installation
 
+### Running Modes
+
+| Mode | Command | Sudo Required | Networking |
+|------|---------|---------------|------------|
+| **System** (default) | `LIBVIRT_URI=qemu:///system` | Yes | Full (bridged, NAT) |
+| **User Session** | `LIBVIRT_URI=qemu:///session` | No | NAT only |
+
+See [docs/07-User-Session-Mode.md](docs/07-User-Session-Mode.md) for session mode details.
+
 ### Step 1: Configure Environment
 
 ```bash
@@ -20,6 +29,8 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 cp .env.example .env
 
 # (Optional) Edit .env to customize settings
+# For user session mode (no sudo):
+#   LIBVIRT_URI=qemu:///session
 ```
 
 ### Step 2: Start VMs
@@ -186,6 +197,7 @@ Use custom metrics or external metrics providers. See `docs/06-HPA-Study-Guide.m
 | `docs/04-Istio-Envoy-Gateway-Preview.md` | Istio installation |
 | `docs/05-Cilium-Setup.md` | Cilium CNI guide |
 | `docs/06-HPA-Study-Guide.md` | HPA examples and exercises |
+| `docs/07-User-Session-Mode.md` | User session mode (no sudo) |
 
 ## Troubleshooting
 

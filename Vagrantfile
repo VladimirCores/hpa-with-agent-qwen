@@ -162,5 +162,11 @@ Vagrant.configure("2") do |config|
     libvirt.connect_via_ssh = false
     libvirt.storage_pool_name = ENV['STORAGE_POOL'] || "default"
     libvirt.uri = ENV['LIBVIRT_URI'] || "qemu:///system"
+    
+    # Session mode uses user-local storage by default
+    if ENV['LIBVIRT_URI'] == "qemu:///session"
+      # Session mode: use user's local libvirt storage
+      libvirt.storage_pool_name = ENV['STORAGE_POOL'] || "default"
+    end
   end
 end
