@@ -337,3 +337,42 @@ POLKIT
 ```
 
 **Recommendation:** For most users, system mode (`qemu:///system`) is recommended as it provides full networking without additional configuration.
+
+## Required Setup: Polkit Configuration
+
+**Important:** Libvirt session mode requires polkit configuration to create network interfaces.
+
+### Create Polkit Rule
+
+Run this command (requires sudo once):
+
+```bash
+sudo tee /etc/polkit-1/rules.d/50-libvirt-networks.rules > /dev/null << 'POLKIT'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.libvirt.unix.network.create" ||
+        action.id == "org.libvirt.unix.network.modify" ||
+        action.id == "org.libvirt.unix.network.start" ||
+        action.id == "org.libvirt.unix.network.destroy") {
+        return polkit.Result.YES;
+    }
+});
+POLKIT
+
+# Reload polkit
+sudo systemctl restart polkit
+```
+
+### Verify Polkit Rule
+
+```bash
+# Check rule exists
+ls -la /etc/polkit-1/rules.d/50-libvirt-networks.rules
+
+# Test network creation
+virsh -c qemu:///session net-list --all
+```
+
+### Without Polkit Configuration
+
+If you cannot configure polkit, the cluster cannot create networks in session mode.
+You would need to use system mode (`qemu:///system`) instead.

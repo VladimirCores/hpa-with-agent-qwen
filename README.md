@@ -12,6 +12,7 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 - **talosctl** CLI for cluster management
 - **kubectl** CLI for Kubernetes management
 - **helm** for component installation
+- **User in libvirt group**: `sudo usermod -aG libvirt $USER` (then log out/in)
 
 ### Running Mode
 
@@ -20,10 +21,34 @@ This cluster runs **exclusively in user session mode** (`qemu:///session`):
 | Feature | Value |
 |---------|-------|
 | **Mode** | User Session |
-| **Sudo Required** | No |
+| **Sudo Required** | No (after initial polkit setup) |
 | **Networking** | NAT only |
 | **Storage** | Project-local (`.vagrant/storage-pool/`) |
 | **Portability** | Full (entire cluster in project folder) |
+
+### One-Time Setup: Polkit Configuration
+
+**Required for network creation in session mode** (run once with sudo):
+
+```bash
+# Create polkit rule to allow network operations
+sudo tee /etc/polkit-1/rules.d/50-libvirt-networks.rules > /dev/null << 'POLKIT'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.libvirt.unix.network.create" ||
+        action.id == "org.libvirt.unix.network.modify" ||
+        action.id == "org.libvirt.unix.network.start" ||
+        action.id == "org.libvirt.unix.network.destroy") {
+        return polkit.Result.YES;
+    }
+});
+POLKIT
+
+# Reload polkit
+sudo systemctl restart polkit
+
+# Verify (should work without sudo)
+virsh -c qemu:///session net-list --all
+```
 
 See [docs/07-User-Session-Mode.md](docs/07-User-Session-Mode.md) for details.
 
