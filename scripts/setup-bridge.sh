@@ -169,6 +169,7 @@ cat > "$DNSMASQ_CONF" <<EOF
 # DHCP only mode - DNS handled by upstream
 interface=$BRIDGE_NAME
 except-interface=lo
+bind-dynamic
 port=0
 dhcp-range=$DHCP_START,$DHCP_END,$NETWORK_MASK,12h
 pid-file=$DNSMASQ_PIDFILE
@@ -182,24 +183,44 @@ EOF
 
 print_success "dnsmasq configuration created: $DNSMASQ_CONF"
 
-# Check if dnsmasq is already running for this bridge
+# Kill any existing dnsmasq for this bridge
 if pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" > /dev/null; then
-    DNSMASQ_PID=$(cat "$DNSMASQ_PIDFILE" 2>/dev/null || pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF")
-    echo "  ✓ dnsmasq is already running for $BRIDGE_NAME (PID: $DNSMASQ_PID)"
-    exit 0
+    echo "  Stopping existing dnsmasq for $BRIDGE_NAME..."
+    sudo pkill -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" || true
+    sleep 1
+fi
+
+# Also kill by PID file if exists
+if [[ -f "$DNSMASQ_PIDFILE" ]]; then
+    OLD_PID=$(cat "$DNSMASQ_PIDFILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "  Stopping dnsmasq (PID: $OLD_PID)..."
+        sudo kill "$OLD_PID" 2>/dev/null || sudo kill -9 "$OLD_PID" 2>/dev/null || true
+        sleep 1
+    fi
+    rm -f "$DNSMASQ_PIDFILE"
 fi
 
 # Start dnsmasq as root (required for DHCP server on port 67)
 echo "  Starting dnsmasq..."
-sudo dnsmasq --conf-file="$DNSMASQ_CONF" --pid-file="$DNSMASQ_PIDFILE"
-
-sleep 2
-
-if [[ -f "$DNSMASQ_PIDFILE" ]] && kill -0 "$(cat "$DNSMASQ_PIDFILE")" 2>/dev/null; then
-    print_success "dnsmasq started (PID: $(cat "$DNSMASQ_PIDFILE"))"
+if sudo dnsmasq --conf-file="$DNSMASQ_CONF" --pid-file="$DNSMASQ_PIDFILE" 2>/dev/null; then
+    sleep 2
+    if [[ -f "$DNSMASQ_PIDFILE" ]] && kill -0 "$(cat "$DNSMASQ_PIDFILE")" 2>/dev/null; then
+        print_success "dnsmasq started (PID: $(cat "$DNSMASQ_PIDFILE"))"
+    else
+        print_error "Failed to start dnsmasq"
+        exit 1
+    fi
 else
-    print_error "Failed to start dnsmasq"
-    exit 1
+    # dnsmasq may already be running, check if it's working
+    echo "  WARNING: dnsmasq start command failed, checking if already running..."
+    sleep 1
+    if pgrep -f "dnsmasq.*$BRIDGE_NAME" > /dev/null || pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" > /dev/null; then
+        echo "  ✓ dnsmasq is already running"
+    else
+        print_error "Failed to start dnsmasq"
+        exit 1
+    fi
 fi
 
 # =============================================================================

@@ -64,13 +64,13 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
     # Bridge mode: connect directly to pre-created bridge (dnsmasq provides DHCP)
     # NAT mode: use libvirt network
     if ENV['FORWARD_MODE'] == 'bridge'
-      # Bridge mode - connect directly to bridge interface
-      vm.vm.network :private_network,
-                    type: 'dhcp',
-                    mac: mac_address,
-                    libvirt__bridge: ENV['BRIDGE_NAME'] || 'cluster-bridge'
+      # Bridge mode - use public_network to connect to existing bridge
+      vm.vm.network :public_network,
+                    dev: ENV['BRIDGE_NAME'] || 'cluster-bridge',
+                    mode: 'bridge',
+                    mac: mac_address
     else
-      # NAT mode - use libvirt network
+      # NAT mode - use libvirt private network
       vm.vm.network :private_network,
                     type: 'dhcp',
                     mac: mac_address,

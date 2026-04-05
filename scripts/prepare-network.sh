@@ -239,7 +239,7 @@ EOF
 )
     echo "  Using NAT mode with pre-created bridge: $BRIDGE_NAME"
 else
-    # System mode with NAT: use configured bridge
+    # System mode with NAT: let libvirt create its own bridge
     NETWORK_XML=$(cat <<EOF
 <network>
   <name>$NETWORK_NAME</name>
@@ -248,7 +248,6 @@ else
       <port start='1024' end='65535'/>
     </nat>
   </forward>
-  <bridge name='$BRIDGE_NAME' stp='on' delay='0'/>
   <ip address='$NETWORK_IP' netmask='$NETWORK_MASK'>
     <dhcp>
       <range start='$DHCP_START' end='$DHCP_END'/>
@@ -258,7 +257,7 @@ $(echo -e "$STATIC_HOSTS")
 </network>
 EOF
 )
-    echo "  Using NAT mode with bridge: $BRIDGE_NAME"
+    echo "  Using NAT mode (libvirt will create bridge)"
 fi
 
 # Define and start the network
