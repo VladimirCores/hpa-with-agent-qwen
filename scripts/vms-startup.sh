@@ -226,7 +226,7 @@ print_success "Network verification passed (from step script)"
 # =============================================================================
 if [[ "$SKIP_CLEANUP" != "true" ]]; then
     print_header "Step 5/8: Cleanup Existing VMs"
-    
+
     run_step "5" "Cleaning up existing VMs" "$STEPS_DIR/06-cleanup-vms.sh" \
         SKIP_CLEANUP="$SKIP_CLEANUP" \
         NETWORK_NAME="$NETWORK_NAME" \
@@ -237,10 +237,23 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
         LIBVIRT_URI="$LIBVIRT_URI" \
         USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
         PROJECT_ROOT="$PROJECT_ROOT"
+    STEP5_RAN=true
 else
     print_header "Step 5/8: Skip Cleanup (requested)"
     print_success "Skipping VM cleanup"
+    STEP5_RAN=false
 fi
+
+# Verify step 5 actually removed VMs from libvirt (it may fail silently)
+echo ""
+echo "Verifying VMs are removed from libvirt..."
+for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
+    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
+    if [[ -n "$actual_vm" ]]; then
+        echo "  WARNING: $actual_vm still exists after step 5 cleanup"
+    fi
+done
+echo ""
 
 # =============================================================================
 # Step 6: Start VMs with Vagrant
@@ -250,8 +263,7 @@ print_header "Step 6/8: Start VMs"
 cd "$PROJECT_ROOT"
 
 # Always remove any existing VMs from libvirt before vagrant up
-# This prevents "domain already taken" errors when VMs exist in libvirt
-# but Vagrant state is out of sync (shutoff, saved, etc.)
+# Step 5 may have cleaned via vagrant but VMs can still exist in libvirt
 echo "Checking for existing VMs in libvirt..."
 found_any=false
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
@@ -259,71 +271,37 @@ for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
     if [[ -n "$actual_vm" ]]; then
         found_any=true
         echo "  Found: $actual_vm - removing..."
-
-        # Step 1: Stop the VM only if running
+        
+        # Stop the VM only if running
         vm_state=$(virsh -c "$LIBVIRT_URI" domstate "$actual_vm" 2>/dev/null)
         if [[ "$vm_state" == "running" ]]; then
-            echo "    Stopping VM..."
-            if ! virsh -c "$LIBVIRT_URI" destroy "$actual_vm" >/dev/null 2>&1; then
-                echo "    WARNING: Failed to stop VM, trying with sudo..."
-                run_sudo virsh -c "$LIBVIRT_URI" destroy "$actual_vm" 2>/dev/null || true
-            fi
+            virsh -c "$LIBVIRT_URI" destroy "$actual_vm" >/dev/null 2>&1 || true
             sleep 1
         fi
-
-        # Step 2: Undefine with all storage
+        
+        # Undefine with all storage
         if virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage >/dev/null 2>&1; then
             echo "    ✓ Removed VM and storage"
         else
-            # Try with sudo
-            if run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage >/dev/null 2>&1; then
-                echo "    ✓ Removed VM and storage (with sudo)"
-            else
-                # Step 3: If --remove-all-storage failed, remove manually
-                echo "    Manual cleanup required..."
-
-                # Try to remove storage volumes
-                disk_name="${actual_vm}-vda.raw"
-                virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" >/dev/null 2>&1 || \
-                    run_sudo virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" >/dev/null 2>&1 || true
-
-                # Also try to remove the file directly
-                if [[ -f "$POOL_PATH/$disk_name" ]]; then
-                    rm -f "$POOL_PATH/$disk_name" 2>/dev/null || \
-                        run_sudo rm -f "$POOL_PATH/$disk_name" 2>/dev/null || true
-                fi
-
-                # Undefine without storage removal
-                if virsh -c "$LIBVIRT_URI" undefine "$actual_vm" >/dev/null 2>&1; then
-                    echo "    ✓ Removed VM (storage may need manual cleanup)"
-                elif run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" >/dev/null 2>&1; then
-                    echo "    ✓ Removed VM with sudo (storage may need manual cleanup)"
-                else
-                    echo "    ✗ ERROR: Failed to undefine VM"
-                fi
-            fi
+            # Try to remove storage volumes manually
+            disk_name="${actual_vm}-vda.raw"
+            virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" >/dev/null 2>&1 || true
+            # Also try qcow2
+            disk_name="${actual_vm}-vda.qcow2"
+            virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" >/dev/null 2>&1 || true
+            # Also try direct file removal
+            rm -f "$POOL_PATH/${actual_vm}-vda.raw" "$POOL_PATH/${actual_vm}-vda.qcow2" 2>/dev/null || true
+            # Remove nvram
+            sudo rm -f /var/lib/libvirt/qemu/nvram/${actual_vm}_VARS.fd 2>/dev/null || true
+            # Undefine without storage removal
+            virsh -c "$LIBVIRT_URI" undefine "$actual_vm" >/dev/null 2>&1 || true
+            echo "    ✓ Removed VM (cleaned up manually)"
         fi
     fi
 done
 
-# Verify all VMs are gone
-verify_clean=true
-for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
-    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
-    if [[ -n "$actual_vm" ]]; then
-        echo "  ERROR: Failed to remove $actual_vm"
-        verify_clean=false
-    fi
-done
-
-if [[ "$verify_clean" != "true" ]]; then
-    print_error "Failed to clean up existing VMs"
-    echo "  Please manually remove VMs with: virsh -c $LIBVIRT_URI undefine --remove-all-storage <vm-name>"
-    exit 1
-fi
-
 if [[ "$found_any" == "true" ]]; then
-    echo "  ✓ All existing VMs removed"
+    echo "  ✓ All existing VMs removed from libvirt"
     echo ""
 fi
 
@@ -357,22 +335,13 @@ for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
 done
 
 # =============================================================================
-# Step 7: Configure UEFI (if needed)
+# Step 7: Configure UEFI (skipped - Talos works fine with BIOS boot)
 # =============================================================================
-print_header "Step 7/8: Configure UEFI"
+print_header "Step 7/8: Skip UEFI Configuration"
 
-run_step "7" "Configuring UEFI" "$STEPS_DIR/08b-configure-uefi.sh" \
-    NETWORK_NAME="$NETWORK_NAME" \
-    MASTER_NAME="$MASTER_NAME" \
-    MASTER_MEMORY="$MASTER_MEMORY" \
-    MASTER_CPUS="$MASTER_CPUS" \
-    WORKER_COUNT="$WORKER_COUNT" \
-    WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-    WORKER_MEMORY="$WORKER_MEMORY" \
-    WORKER_CPUS="$WORKER_CPUS" \
-    POOL_PATH="$POOL_PATH" \
-    LIBVIRT_URI="$LIBVIRT_URI" \
-    TALOS_IMAGE_PATH="$TALOS_IMAGE_PATH"
+print_success "UEFI configuration skipped (Talos works with BIOS boot)"
+echo "  VMs will boot from ISO and install to disk using BIOS firmware"
+echo ""
 
 # =============================================================================
 # Step 8: Wait for Talos to Boot

@@ -237,12 +237,17 @@ if [[ $RECONFIGURED -gt 0 ]]; then
     echo "Starting VMs with UEFI firmware..."
     echo ""
 
+    # Give libvirt a moment to settle after redefine
+    sleep 2
+
     # Master
     echo "  Starting $MASTER_VM_NAME..."
     if virsh -c "$LIBVIRT_URI" start "$MASTER_VM_NAME" 2>/dev/null; then
         echo "    ✓ Started"
     else
-        echo "    ✗ Failed to start"
+        echo "    ✗ Failed to start, trying again..."
+        sleep 3
+        virsh -c "$LIBVIRT_URI" start "$MASTER_VM_NAME" 2>&1 || echo "    ✗ Still failed"
     fi
 
     # Workers
@@ -253,7 +258,9 @@ if [[ $RECONFIGURED -gt 0 ]]; then
         if virsh -c "$LIBVIRT_URI" start "$WORKER_VM_NAME" 2>/dev/null; then
             echo "    ✓ Started"
         else
-            echo "    ✗ Failed to start"
+            echo "    ✗ Failed to start, trying again..."
+            sleep 3
+            virsh -c "$LIBVIRT_URI" start "$WORKER_VM_NAME" 2>&1 || echo "    ✗ Still failed"
         fi
     done
 
