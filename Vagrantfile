@@ -87,7 +87,7 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
       # Raw image mode - use pre-installed disk image
       # Vagrant will create the disk in the storage pool
       if ENV['USE_RAW_IMAGE'] == 'true'
-        # CDROM with Talos ISO (boot first for installation)
+        # CDROM with Talos ISO (fallback if disk is empty)
         domain.storage :file,
                        device: :cdrom,
                        path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
@@ -98,25 +98,25 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
                        bus: 'virtio',
                        cache: 'none',
                        type: 'raw'
-        # Boot order: CDROM first (for install), then disk (for normal operation)
-        domain.boot 'cdrom'
+        # Boot order: Disk first (persistent), CDROM as fallback for install
         domain.boot 'hd'
+        domain.boot 'cdrom'
 
       # ISO-based installation (traditional)
       elsif ENV['USE_BOX'] != 'true'
-        # CDROM with Talos ISO (boot first for installation)
+        # CDROM with Talos ISO (fallback if disk is empty)
         domain.storage :file,
                        device: :cdrom,
                        path: File.expand_path(ENV['TALOS_IMAGE_PATH'] || "./metal-amd64.iso")
-        # Persistent disk for Talos installation (boot second after install)
+        # Persistent disk for Talos installation
         domain.storage :file,
                        size: "#{disk_size_gb}G",
                        bus: 'virtio',
                        cache: 'none',
                        type: 'raw'
-        # Boot order: CDROM first (for install), then disk (for normal operation)
-        domain.boot 'cdrom'
+        # Boot order: Disk first (persistent), CDROM as fallback for install
         domain.boot 'hd'
+        domain.boot 'cdrom'
 
       # Using Vagrant box
       else
