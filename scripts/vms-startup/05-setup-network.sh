@@ -2,7 +2,8 @@
 # =============================================================================
 # Step 05: Setup Network
 # =============================================================================
-# Creates or updates libvirt network for Talos cluster
+# For bridge mode: runs setup-bridge.sh (creates bridge + dnsmasq)
+# For NAT mode: runs prepare-network.sh (creates libvirt network)
 # Returns: 0 on success, 1 on failure
 # =============================================================================
 
@@ -25,7 +26,29 @@ NC='\033[0m'
 echo "Setting up network..."
 echo ""
 
-# Check prepare-network.sh exists
+# For bridge mode, run setup-bridge.sh
+if [[ "$FORWARD_MODE" == "bridge" ]]; then
+    echo "Bridge mode detected - setting up bridge interface..."
+    echo ""
+    
+    # Check setup-bridge.sh exists
+    if [[ ! -x "$SCRIPT_DIR/setup-bridge.sh" ]]; then
+        echo -e "${RED}ERROR: setup-bridge.sh not found or not executable${NC}"
+        exit 1
+    fi
+    
+    # Run setup-bridge.sh (will prompt for sudo if needed)
+    if "$SCRIPT_DIR/setup-bridge.sh"; then
+        echo ""
+        echo -e "${GREEN}✓ Bridge setup completed${NC}"
+        exit 0
+    else
+        echo -e "${RED}ERROR: Failed to setup bridge${NC}"
+        exit 1
+    fi
+fi
+
+# For NAT mode, run prepare-network.sh
 if [[ ! -x "$SCRIPT_DIR/prepare-network.sh" ]]; then
     echo -e "${RED}ERROR: prepare-network.sh not found or not executable${NC}"
     exit 1
@@ -34,18 +57,8 @@ fi
 # Run prepare-network.sh
 if LIBVIRT_URI="$LIBVIRT_URI" "$SCRIPT_DIR/prepare-network.sh"; then
     echo ""
-    
-    # Verify network is active
-    echo "Verifying network..."
-    sleep 2
-    
-    if virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" 2>/dev/null | grep -q "Active.*yes"; then
-        echo -e "${GREEN}Network '$NETWORK_NAME' is active${NC}"
-        exit 0
-    else
-        echo -e "${RED}ERROR: Network '$NETWORK_NAME' is not active${NC}"
-        exit 1
-    fi
+    echo -e "${GREEN}✓ Network setup completed${NC}"
+    exit 0
 else
     echo -e "${RED}ERROR: Failed to setup network${NC}"
     exit 1

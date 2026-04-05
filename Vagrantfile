@@ -60,11 +60,22 @@ def configure_talos_vm(config, name, cpus, memory_mb, ip, mac_address, disk_size
       vm.vm.box = ENV['BOX_NAME'] || 'talos'
     end
 
-    # Network with static DHCP reservation
-    vm.vm.network :private_network,
-                  type: 'dhcp',
-                  mac: mac_address,
-                  libvirt__network_name: ENV['NETWORK_NAME'] || "cluster-talos-net"
+    # Network configuration based on forward mode
+    # Bridge mode: connect directly to pre-created bridge (dnsmasq provides DHCP)
+    # NAT mode: use libvirt network
+    if ENV['FORWARD_MODE'] == 'bridge'
+      # Bridge mode - connect directly to bridge interface
+      vm.vm.network :private_network,
+                    type: 'dhcp',
+                    mac: mac_address,
+                    libvirt__bridge: ENV['BRIDGE_NAME'] || 'cluster-bridge'
+    else
+      # NAT mode - use libvirt network
+      vm.vm.network :private_network,
+                    type: 'dhcp',
+                    mac: mac_address,
+                    libvirt__network_name: ENV['NETWORK_NAME'] || "cluster-talos-net"
+    end
 
     # Libvirt provider configuration
     vm.vm.provider :libvirt do |domain|

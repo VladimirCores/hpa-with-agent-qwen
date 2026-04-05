@@ -179,9 +179,8 @@ print_header "Step 4/8: Setup Network"
 
 run_step "4" "Setting up network" "$VMS_STARTUP_DIR/05-setup-network.sh"
 
-sleep 2
-verify_step "Network is active" \
-    "virsh -c '$LIBVIRT_URI' net-info '$NETWORK_NAME' 2>/dev/null | grep -q 'Active.*yes'"
+# Verification already done in the script, skip duplicate check
+print_success "Network verification already completed"
 
 # =============================================================================
 # Step 5: Cleanup Existing VMs

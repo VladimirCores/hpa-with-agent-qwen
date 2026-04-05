@@ -16,3 +16,7 @@ talos-cluster/
 
 # Ignore Qwen Code settings
 .qwen/
+
+.dnsmasq
+
+.idea
