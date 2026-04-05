@@ -17,6 +17,21 @@ set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
+# Source sudo helper
+SUDO_HELPER="$PROJECT_ROOT/scripts/vms-startup/00-sudo-helper.sh"
+if [[ -f "$SUDO_HELPER" ]]; then
+    source "$SUDO_HELPER"
+else
+    # Fallback: define run_sudo if helper not found
+    run_sudo() {
+        if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+            echo "$SUDO_PASSWORD" | sudo -S "$@" 2>/dev/null
+        else
+            sudo "$@"
+        fi
+    }
+fi
+
 echo "=== Preparing Talos Cluster Network ==="
 echo "Network Name: $NETWORK_NAME"
 echo "Bridge Name: $BRIDGE_NAME"
@@ -129,18 +144,18 @@ create_bridge_interface() {
         
         # Create bridge interface (requires sudo)
         echo "  Creating bridge interface '$BRIDGE_NAME'..."
-        if sudo ip link add name "$BRIDGE_NAME" type bridge; then
+        if run_sudo ip link add name "$BRIDGE_NAME" type bridge; then
             echo "  ✓ Bridge interface created"
             
             # Bring up the bridge
             echo "  Bringing up bridge interface..."
-            sudo ip link set "$BRIDGE_NAME" up
+            run_sudo ip link set "$BRIDGE_NAME" up
             echo "  ✓ Bridge interface is up"
             
             # Add to polkit ACL if not already present
             if ! grep -q "$BRIDGE_NAME" /etc/qemu/bridge.conf 2>/dev/null; then
                 echo "  Adding bridge to QEMU ACL..."
-                echo "allow $BRIDGE_NAME" | sudo tee -a /etc/qemu/bridge.conf > /dev/null
+                echo "allow $BRIDGE_NAME" | run_sudo tee -a /etc/qemu/bridge.conf > /dev/null
                 echo "  ✓ Bridge added to ACL"
             fi
             

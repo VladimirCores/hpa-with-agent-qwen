@@ -20,9 +20,9 @@ if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
     # Expand ~ to home directory if needed
     POOL_PATH="${POOL_PATH/#\~/$HOME}"
     
-    sudo mkdir -p "$POOL_PATH"
-    sudo chown qemu:kvm "$POOL_PATH"
-    sudo chmod 755 "$POOL_PATH"
+    run_sudo mkdir -p "$POOL_PATH"
+    run_sudo chown qemu:kvm "$POOL_PATH"
+    run_sudo chmod 755 "$POOL_PATH"
 
     cat <<EOF | virsh -c "$LIBVIRT_URI" pool-define /dev/stdin
 <pool type='dir'>

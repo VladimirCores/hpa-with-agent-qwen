@@ -36,9 +36,9 @@ if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
         echo "  Using session storage: $POOL_PATH"
     else
         # System mode: requires sudo
-        sudo mkdir -p "$POOL_PATH"
-        sudo chown qemu:kvm "$POOL_PATH"
-        sudo chmod 755 "$POOL_PATH"
+        run_sudo mkdir -p "$POOL_PATH"
+        run_sudo chown qemu:kvm "$POOL_PATH"
+        run_sudo chmod 755 "$POOL_PATH"
         echo "  Using system storage: $POOL_PATH"
     fi
 

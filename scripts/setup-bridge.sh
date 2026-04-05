@@ -22,6 +22,20 @@ else
     exit 1
 fi
 
+# Source sudo helper
+SUDO_HELPER="$PROJECT_ROOT/scripts/vms-startup/00-sudo-helper.sh"
+if [[ -f "$SUDO_HELPER" ]]; then
+    source "$SUDO_HELPER"
+else
+    run_sudo() {
+        if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+            echo "$SUDO_PASSWORD" | sudo -S "$@" 2>/dev/null
+        else
+            sudo "$@"
+        fi
+    }
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -72,7 +86,7 @@ if ip link show "$BRIDGE_NAME" &>/dev/null; then
     echo "  Bridge '$BRIDGE_NAME' already exists"
 else
     echo "  Creating bridge interface '$BRIDGE_NAME'..."
-    if sudo ip link add name "$BRIDGE_NAME" type bridge; then
+    if run_sudo ip link add name "$BRIDGE_NAME" type bridge; then
         print_success "Bridge interface created"
     else
         print_error "Failed to create bridge interface"
@@ -99,7 +113,7 @@ if ip link show "$BRIDGE_NAME" | grep -q "state UP"; then
     echo "  Bridge is already UP"
 else
     echo "  Bringing up bridge interface..."
-    sudo ip link set "$BRIDGE_NAME" up
+    run_sudo ip link set "$BRIDGE_NAME" up
     print_success "Bridge is UP"
 fi
 
@@ -112,7 +126,7 @@ if grep -q "$BRIDGE_NAME" /etc/qemu/bridge.conf 2>/dev/null; then
     echo "  Bridge already in QEMU ACL"
 else
     echo "  Adding '$BRIDGE_NAME' to /etc/qemu/bridge.conf..."
-    echo "allow $BRIDGE_NAME" | sudo tee -a /etc/qemu/bridge.conf > /dev/null
+    echo "allow $BRIDGE_NAME" | run_sudo tee -a /etc/qemu/bridge.conf > /dev/null
     print_success "Bridge added to QEMU ACL"
 fi
 
@@ -186,7 +200,7 @@ print_success "dnsmasq configuration created: $DNSMASQ_CONF"
 # Kill any existing dnsmasq for this bridge
 if pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" > /dev/null; then
     echo "  Stopping existing dnsmasq for $BRIDGE_NAME..."
-    sudo pkill -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" || true
+    run_sudo pkill -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" || true
     sleep 1
 fi
 
@@ -195,7 +209,7 @@ if [[ -f "$DNSMASQ_PIDFILE" ]]; then
     OLD_PID=$(cat "$DNSMASQ_PIDFILE")
     if kill -0 "$OLD_PID" 2>/dev/null; then
         echo "  Stopping dnsmasq (PID: $OLD_PID)..."
-        sudo kill "$OLD_PID" 2>/dev/null || sudo kill -9 "$OLD_PID" 2>/dev/null || true
+        run_sudo kill "$OLD_PID" 2>/dev/null || run_sudo kill -9 "$OLD_PID" 2>/dev/null || true
         sleep 1
     fi
     rm -f "$DNSMASQ_PIDFILE"
@@ -203,7 +217,7 @@ fi
 
 # Start dnsmasq as root (required for DHCP server on port 67)
 echo "  Starting dnsmasq..."
-if sudo dnsmasq --conf-file="$DNSMASQ_CONF" --pid-file="$DNSMASQ_PIDFILE" 2>/dev/null; then
+if run_sudo dnsmasq --conf-file="$DNSMASQ_CONF" --pid-file="$DNSMASQ_PIDFILE" 2>/dev/null; then
     sleep 2
     if [[ -f "$DNSMASQ_PIDFILE" ]] && kill -0 "$(cat "$DNSMASQ_PIDFILE")" 2>/dev/null; then
         print_success "dnsmasq started (PID: $(cat "$DNSMASQ_PIDFILE"))"

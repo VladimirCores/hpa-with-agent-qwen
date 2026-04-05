@@ -44,3 +44,10 @@ export WORKER_NAME_PREFIX
 export WORKER_IP_BASE
 export STORAGE_POOL
 export POOL_PATH
+export SUDO_PASSWORD
+
+# Source sudo helper functions
+SUDO_HELPER_SCRIPT="$STEP_DIR/00-sudo-helper.sh"
+if [[ -f "$SUDO_HELPER_SCRIPT" ]]; then
+    source "$SUDO_HELPER_SCRIPT"
+fi

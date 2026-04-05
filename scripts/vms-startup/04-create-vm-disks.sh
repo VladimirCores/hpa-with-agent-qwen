@@ -42,9 +42,9 @@ if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
     POOL_PATH="${POOL_PATH/#\~/$HOME}"
     
     # Create pool directory
-    sudo mkdir -p "$POOL_PATH"
-    sudo chown qemu:kvm "$POOL_PATH"
-    sudo chmod 755 "$POOL_PATH"
+    run_sudo mkdir -p "$POOL_PATH"
+    run_sudo chown qemu:kvm "$POOL_PATH"
+    run_sudo chmod 755 "$POOL_PATH"
     
     # Create pool XML
     POOL_XML=$(cat <<EOF
@@ -77,8 +77,8 @@ fi
 BASE_VOLUME_NAME="talos-base-image.qcow2"
 if ! virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$BASE_VOLUME_NAME" &>/dev/null; then
     echo "  Creating base image volume in pool..."
-    sudo cp "$BASE_IMAGE" "$POOL_PATH/$BASE_VOLUME_NAME"
-    sudo chmod 644 "$POOL_PATH/$BASE_VOLUME_NAME"
+    run_sudo cp "$BASE_IMAGE" "$POOL_PATH/$BASE_VOLUME_NAME"
+    run_sudo chmod 644 "$POOL_PATH/$BASE_VOLUME_NAME"
     virsh -c "$LIBVIRT_URI" pool-refresh "$STORAGE_POOL"
     echo "  ✓ Base image volume created"
 else
@@ -114,7 +114,7 @@ replace_with_overlay() {
         local current_size=$(echo "$vol_info" | grep "Capacity:" | awk '{print $2}' | sed 's/GiB//')
         if (( $(echo "$current_size < $disk_size_gb" | bc -l 2>/dev/null || echo 0) )); then
             echo "  Resizing disk from ${current_size}GiB to ${disk_size_gb}GiB..."
-            sudo qemu-img resize "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
+            run_sudo qemu-img resize "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
             echo "  ✓ Disk resized"
         fi
         return 0
@@ -123,20 +123,20 @@ replace_with_overlay() {
     echo "  Replacing with CoW overlay: $vm_name (size: ${disk_size_gb}G)"
 
     # Move existing volume to temp
-    sudo mv "$volume_path" "$temp_path"
+    run_sudo mv "$volume_path" "$temp_path"
 
     # Create CoW overlay with correct virtual size
-    sudo qemu-img create -f qcow2 -F qcow2 -b "$POOL_PATH/$BASE_VOLUME_NAME" "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
+    run_sudo qemu-img create -f qcow2 -F qcow2 -b "$POOL_PATH/$BASE_VOLUME_NAME" "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
     
     if [[ $? -eq 0 ]]; then
-        sudo chown qemu:kvm "$volume_path"
-        sudo chmod 644 "$volume_path"
+        run_sudo chown qemu:kvm "$volume_path"
+        run_sudo chmod 644 "$volume_path"
         sudo rm -f "$temp_path"
         virsh -c "$LIBVIRT_URI" pool-refresh "$STORAGE_POOL" >/dev/null 2>&1
         echo "  ✓ Created CoW overlay: $volume_name"
     else
         echo "  ERROR: Failed to create overlay, restoring..."
-        sudo mv "$temp_path" "$volume_path"
+        run_sudo mv "$temp_path" "$volume_path"
         return 1
     fi
 }

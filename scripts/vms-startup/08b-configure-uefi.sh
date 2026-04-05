@@ -41,11 +41,11 @@ echo ""
 
 # Ensure NVRAM directory exists
 echo "  Ensuring NVRAM directory exists..."
-if ! sudo mkdir -p "$NVRAM_DIR" 2>/dev/null; then
+if ! run_sudo mkdir -p "$NVRAM_DIR" 2>/dev/null; then
     echo "  WARNING: Could not create NVRAM directory, continuing anyway..."
 fi
-sudo chown qemu:kvm "$NVRAM_DIR" 2>/dev/null || true
-sudo chmod 755 "$NVRAM_DIR" 2>/dev/null || true
+run_sudo chown qemu:kvm "$NVRAM_DIR" 2>/dev/null || true
+run_sudo chmod 755 "$NVRAM_DIR" 2>/dev/null || true
 echo "  ✓ NVRAM directory ready"
 echo ""
 
@@ -83,8 +83,8 @@ configure_uefi() {
     # Copy OVMF_VARS if template exists
     if [[ -f "$OVMF_VARS" ]] && [[ ! -f "$nvram_path" ]]; then
         echo "    Creating NVRAM storage..."
-        sudo cp "$OVMF_VARS" "$nvram_path" 2>/dev/null || true
-        sudo chown qemu:kvm "$nvram_path" 2>/dev/null || true
+        run_sudo cp "$OVMF_VARS" "$nvram_path" 2>/dev/null || true
+        run_sudo chown qemu:kvm "$nvram_path" 2>/dev/null || true
     fi
     
     # Create VM XML with UEFI
