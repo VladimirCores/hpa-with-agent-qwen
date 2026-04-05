@@ -259,33 +259,49 @@ for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
     if [[ -n "$actual_vm" ]]; then
         found_any=true
         echo "  Found: $actual_vm - removing..."
-        
-        # Step 1: Stop the VM if running
-        run_sudo virsh -c "$LIBVIRT_URI" destroy "$actual_vm" 2>/dev/null || true
-        sleep 1
-        
+
+        # Step 1: Stop the VM only if running
+        vm_state=$(virsh -c "$LIBVIRT_URI" domstate "$actual_vm" 2>/dev/null)
+        if [[ "$vm_state" == "running" ]]; then
+            echo "    Stopping VM..."
+            if ! virsh -c "$LIBVIRT_URI" destroy "$actual_vm" >/dev/null 2>&1; then
+                echo "    WARNING: Failed to stop VM, trying with sudo..."
+                run_sudo virsh -c "$LIBVIRT_URI" destroy "$actual_vm" 2>/dev/null || true
+            fi
+            sleep 1
+        fi
+
         # Step 2: Undefine with all storage
-        if run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage 2>/dev/null; then
+        if virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage >/dev/null 2>&1; then
             echo "    ✓ Removed VM and storage"
         else
-            # Step 3: If --remove-all-storage failed, remove manually
-            echo "    Storage not removed automatically, cleaning up manually..."
-            
-            # List all storage associated with this VM
-            disk_name="${actual_vm}-vda.raw"
-            
-            # Try to remove from storage pool
-            run_sudo virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" 2>/dev/null || true
-            
-            # Also try to remove the file directly
-            if [[ -f "$POOL_PATH/$disk_name" ]]; then
-                run_sudo rm -f "$POOL_PATH/$disk_name"
+            # Try with sudo
+            if run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage >/dev/null 2>&1; then
+                echo "    ✓ Removed VM and storage (with sudo)"
+            else
+                # Step 3: If --remove-all-storage failed, remove manually
+                echo "    Manual cleanup required..."
+
+                # Try to remove storage volumes
+                disk_name="${actual_vm}-vda.raw"
+                virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" >/dev/null 2>&1 || \
+                    run_sudo virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" >/dev/null 2>&1 || true
+
+                # Also try to remove the file directly
+                if [[ -f "$POOL_PATH/$disk_name" ]]; then
+                    rm -f "$POOL_PATH/$disk_name" 2>/dev/null || \
+                        run_sudo rm -f "$POOL_PATH/$disk_name" 2>/dev/null || true
+                fi
+
+                # Undefine without storage removal
+                if virsh -c "$LIBVIRT_URI" undefine "$actual_vm" >/dev/null 2>&1; then
+                    echo "    ✓ Removed VM (storage may need manual cleanup)"
+                elif run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" >/dev/null 2>&1; then
+                    echo "    ✓ Removed VM with sudo (storage may need manual cleanup)"
+                else
+                    echo "    ✗ ERROR: Failed to undefine VM"
+                fi
             fi
-            
-            # Undefine without storage removal
-            run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" 2>/dev/null || true
-            
-            echo "    ✓ Removed VM and cleaned storage manually"
         fi
     fi
 done
