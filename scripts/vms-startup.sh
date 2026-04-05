@@ -249,21 +249,67 @@ print_header "Step 6/8: Start VMs"
 
 cd "$PROJECT_ROOT"
 
-echo "Starting VMs with Vagrant..."
-if vagrant up --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
-    # Check the actual exit status of vagrant up
-    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+# Check if VMs already exist in libvirt
+vms_exist=false
+vms_running=true
+for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
+    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
+    if [[ -n "$actual_vm" ]]; then
+        vms_exist=true
+        vm_state=$(virsh -c "$LIBVIRT_URI" domstate "$actual_vm" 2>/dev/null)
+        if [[ "$vm_state" != "running" ]]; then
+            vms_running=false
+        fi
+    fi
+done
+
+if [[ "$vms_exist" == "true" ]] && [[ "$vms_running" == "true" ]]; then
+    print_success "VMs already exist and running"
+elif [[ "$vms_exist" == "true" ]] && [[ "$vms_running" == "false" ]]; then
+    echo "VMs exist but are not running. Starting with vagrant..."
+    if vagrant up --no-provision --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            print_error "Vagrant failed to start existing VMs"
+            echo ""
+            echo "Check /tmp/vagrant-up.log for details"
+            echo ""
+            echo "Try running with -f flag to force cleanup and recreate VMs"
+            exit 1
+        fi
+        print_success "VMs started successfully"
+    else
+        print_error "Vagrant failed to start existing VMs"
+        echo ""
+        echo "Check /tmp/vagrant-up.log for details"
+        exit 1
+    fi
+else
+    echo "Starting VMs with Vagrant..."
+    if vagrant up --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
+        # Check the actual exit status of vagrant up
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            # Check if error is about existing domains
+            if grep -q "already taken" /tmp/vagrant-up.log 2>/dev/null; then
+                print_error "VM domains already exist in libvirt"
+                echo ""
+                echo "Existing VMs found. Options:"
+                echo "  1. Run without -s flag to cleanup and recreate"
+                echo "  2. Run with -f flag to force reset"
+                echo "  3. Manually destroy VMs: vagrant destroy -f"
+                exit 1
+            fi
+            print_error "Vagrant failed to start VMs"
+            echo ""
+            echo "Check /tmp/vagrant-up.log for details"
+            exit 1
+        fi
+        print_success "VMs started successfully"
+    else
         print_error "Vagrant failed to start VMs"
         echo ""
         echo "Check /tmp/vagrant-up.log for details"
         exit 1
     fi
-    print_success "VMs started successfully"
-else
-    print_error "Vagrant failed to start VMs"
-    echo ""
-    echo "Check /tmp/vagrant-up.log for details"
-    exit 1
 fi
 
 # Verify VMs are running
