@@ -258,25 +258,55 @@ for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
     actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
     if [[ -n "$actual_vm" ]]; then
         found_any=true
-        echo "  Found: $actual_vm"
+        echo "  Found: $actual_vm - removing..."
+        
+        # Step 1: Stop the VM if running
+        run_sudo virsh -c "$LIBVIRT_URI" destroy "$actual_vm" 2>/dev/null || true
+        sleep 1
+        
+        # Step 2: Undefine with all storage
+        if run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage 2>/dev/null; then
+            echo "    ✓ Removed VM and storage"
+        else
+            # Step 3: If --remove-all-storage failed, remove manually
+            echo "    Storage not removed automatically, cleaning up manually..."
+            
+            # List all storage associated with this VM
+            disk_name="${actual_vm}-vda.raw"
+            
+            # Try to remove from storage pool
+            run_sudo virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" 2>/dev/null || true
+            
+            # Also try to remove the file directly
+            if [[ -f "$POOL_PATH/$disk_name" ]]; then
+                run_sudo rm -f "$POOL_PATH/$disk_name"
+            fi
+            
+            # Undefine without storage removal
+            run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" 2>/dev/null || true
+            
+            echo "    ✓ Removed VM and cleaned storage manually"
+        fi
     fi
 done
 
+# Verify all VMs are gone
+verify_clean=true
+for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
+    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
+    if [[ -n "$actual_vm" ]]; then
+        echo "  ERROR: Failed to remove $actual_vm"
+        verify_clean=false
+    fi
+done
+
+if [[ "$verify_clean" != "true" ]]; then
+    print_error "Failed to clean up existing VMs"
+    echo "  Please manually remove VMs with: virsh -c $LIBVIRT_URI undefine --remove-all-storage <vm-name>"
+    exit 1
+fi
+
 if [[ "$found_any" == "true" ]]; then
-    echo ""
-    echo "  Removing existing VMs from libvirt..."
-    for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
-        actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
-        if [[ -n "$actual_vm" ]]; then
-            echo "    Destroying: $actual_vm"
-            run_sudo virsh -c "$LIBVIRT_URI" destroy "$actual_vm" 2>/dev/null || true
-            run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage 2>/dev/null || true
-            # Fallback: remove disk manually if --remove-all-storage fails
-            disk_name="${actual_vm}-vda.raw"
-            run_sudo virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" 2>/dev/null || true
-            echo "    ✓ Removed $actual_vm"
-        fi
-    done
     echo "  ✓ All existing VMs removed"
     echo ""
 fi
