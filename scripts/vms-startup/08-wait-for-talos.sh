@@ -17,10 +17,11 @@ if ! declare -f libvirt_get_dhcp_ips &>/dev/null; then
 fi
 
 # Configuration
-BOOT_WAIT=300  # 5 minutes max
+BOOT_WAIT=300  # 5 minutes max for ISO install
 BOOT_INTERVAL=5
 BOOT_ELAPSED=0
 VERBOSE="${VERBOSE:-true}"
+VM_PREFIX="$(basename "$(dirname "$(dirname "$STEP_DIR")")")_"
 
 # ============================================================================
 # Helper Functions
@@ -174,15 +175,11 @@ show_dhcp_leases() {
 # Main Execution
 # ============================================================================
 
-echo "[8/12] Waiting for Talos to boot from ISO..."
+echo "[8/12] Waiting for Talos to boot from ISO and install to disk..."
 echo "  Configuration:"
 echo "    Timeout: ${BOOT_WAIT}s"
 echo "    Interval: ${BOOT_INTERVAL}s"
 echo "    Verbose: $VERBOSE"
-echo ""
-
-log_info "Waiting for Talos API to be accessible..."
-log_info "  (Polling every ${BOOT_INTERVAL}s, timeout ${BOOT_WAIT}s)"
 echo ""
 
 # Phase 1: Wait for VMs to be running
@@ -196,16 +193,100 @@ echo ""
 # Phase 3: Show initial DHCP leases (verbose)
 show_dhcp_leases
 
-# Phase 4: Poll Talos machines until all are READY
+# Phase 4: Wait for Talos maintenance mode (ISO boot)
+log_info "Waiting for Talos maintenance mode (ISO boot)..."
+MAINTENANCE_ELAPSED=0
+MAINTENANCE_WAIT=120
+
+while [[ $MAINTENANCE_ELAPSED -lt $MAINTENANCE_WAIT ]]; do
+    MASTER_IP="${VM_IPS[0]:-}"
+    if [[ -n "$MASTER_IP" ]]; then
+        if talosctl version --nodes "$MASTER_IP" --insecure 2>&1 | grep -q "v1\."; then
+            log_info "  ✓ Talos maintenance mode accessible at $MASTER_IP"
+            break
+        fi
+    fi
+    sleep $BOOT_INTERVAL
+    MAINTENANCE_ELAPSED=$((MAINTENANCE_ELAPSED + BOOT_INTERVAL))
+    log_verbose "  ... waiting for maintenance mode (${MAINTENANCE_ELAPSED}s)"
+done
+
+if [[ $MAINTENANCE_ELAPSED -ge $MAINTENANCE_WAIT ]]; then
+    log_warning "Talos maintenance mode not accessible after ${MAINTENANCE_WAIT}s"
+fi
+
+echo ""
+
+# Phase 5: Wait for install to disk (monitor disk growth)
+log_info "Waiting for Talos install to disk..."
+INSTALL_WAIT=300
+INSTALL_ELAPSED=0
+INITIAL_DISK_SIZE=""
+
+while [[ $INSTALL_ELAPSED -lt $INSTALL_WAIT ]]; do
+    MASTER_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${MASTER_NAME}" | awk '{print $2}' | head -1)
+    
+    if [[ -n "$MASTER_VM" ]]; then
+        CURRENT_DISK=$(virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "${MASTER_VM}-vda.raw" 2>/dev/null | grep -i allocation | awk '{print $2}')
+        
+        if [[ -z "$INITIAL_DISK_SIZE" ]]; then
+            INITIAL_DISK_SIZE="$CURRENT_DISK"
+        fi
+        
+        # Check if disk has grown significantly (install in progress or complete)
+        if [[ "$CURRENT_DISK" != "$INITIAL_DISK_SIZE" ]] || [[ $INSTALL_ELAPSED -gt 60 ]]; then
+            log_info "  ✓ Disk activity detected (installing to disk)"
+            
+            # Wait a bit more for install to finish
+            sleep 30
+            break
+        fi
+    fi
+    
+    sleep $BOOT_INTERVAL
+    INSTALL_ELAPSED=$((INSTALL_ELAPSED + BOOT_INTERVAL))
+    log_verbose "  ... waiting for install (${INSTALL_ELAPSED}s)"
+done
+
+echo ""
+
+# Phase 6: Change boot order to disk
+log_info "Changing boot order from CDROM to disk..."
+if bash "$STEP_DIR/08a-change-boot-order.sh"; then
+    log_info "  ✓ Boot order changed"
+else
+    log_warning "  Failed to change boot order, continuing anyway"
+fi
+
+echo ""
+
+# Phase 7: Reboot VMs to boot from disk
+log_info "Rebooting VMs to boot from disk..."
+for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
+    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${vm_name}" | awk '{print $2}' | head -1)
+    if [[ -n "$actual_vm" ]]; then
+        virsh -c "$LIBVIRT_URI" reboot "$actual_vm" >/dev/null 2>&1 || true
+        log_verbose "  Rebooting $actual_vm..."
+    fi
+done
+
+# Wait for VMs to come back up
+sleep 15
+
+# Phase 8: Poll Talos machines from disk boot
+log_info "Waiting for Talos to boot from disk..."
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
     log_info "  [${BOOT_ELAPSED}s] Checking VM status..."
 
+    # Refresh DHCP leases after reboot
+    mapfile -t VM_IPS < <(get_dhcp_ips "$NETWORK_NAME")
+    
     total_count=${#VM_IPS[@]}
-    log_verbose "  > Checking ${total_count} IPs..."
+    log_verbose "  > Found ${total_count} IPs: ${VM_IPS[*]}"
 
-    if check_all_machines_ready "${VM_IPS[@]}"; then
+    if [[ $total_count -gt 0 ]] && check_all_machines_ready "${VM_IPS[@]}"; then
         echo ""
-        log_info "  Progress: ${#VM_IPS[@]}/${total_count} VMs ready"
+        log_info "  Progress: ${total_count}/${total_count} VMs ready"
         echo ""
         log_info "  All VMs ready!"
         break
@@ -238,13 +319,13 @@ if [[ $BOOT_ELAPSED -ge $BOOT_WAIT ]]; then
 fi
 
 echo ""
-log_info "  ✓ Talos booted from ISO"
+log_info "  ✓ Talos booted from disk"
 echo ""
 
 # Return success if at least master is ready
 MASTER_IP="${VM_IPS[0]:-}"
 if [[ -n "$MASTER_IP" ]]; then
-    if talosctl version --nodes "$MASTER_IP" --insecure &>/dev/null; then
+    if talosctl version --nodes "$MASTER_IP" 2>&1 | grep -q "Server:"; then
         echo "Master node is accessible"
         exit 0
     fi
