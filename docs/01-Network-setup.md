@@ -8,21 +8,21 @@ The network configuration creates an isolated NAT network with static DHCP reser
 
 ### Network Details
 
-| Setting      | Value               |
-| ------------ | ------------------- |
-| Network Name | `cluster-talos-net` |
-| Bridge Name  | `talos-bridge`      |
-| Network CIDR | `10.0.0.1/24`       |
-| Gateway IP   | `10.0.0.1`          |
-| Forward Mode | NAT                 |
+| Setting      | Value                |
+| ------------ | -------------------- |
+| Network Name | `cluster-net`        |
+| Bridge Name  | `cluster-bridge`     |
+| Network CIDR | `192.168.123.1/24`   |
+| Gateway IP   | `192.168.123.1`      |
+| Forward Mode | NAT (or bridge mode) |
 
 ### Static IP Reservations
 
-| Node           | IP Address | MAC Address        |
-| -------------- | ---------- | ------------------ |
-| talos-master   | 10.0.0.10  | `${MAC_PREFIX}:01` |
-| talos-worker-1 | 10.0.0.11  | `${MAC_PREFIX}:0b` |
-| talos-worker-2 | 10.0.0.12  | `${MAC_PREFIX}:0c` |
+| Node           | IP Address      | MAC Address        |
+| -------------- | --------------- | ------------------ |
+| talos-master   | 192.168.123.10  | `${MAC_PREFIX}:01` |
+| talos-worker-1 | 192.168.123.20  | `${MAC_PREFIX}:0b` |
+| talos-worker-2 | 192.168.123.21  | `${MAC_PREFIX}:0c` |
 
 > **Note:** MAC addresses are generated using the `MAC_PREFIX` from `.env` (default: `52:54:00:00:00`).
 
@@ -56,20 +56,20 @@ The script will:
 virsh net-list --all
 
 # Show network details
-virsh net-info cluster-talos-net
+virsh net-info cluster-net
 
 # Show DHCP leases (after VMs are running)
-virsh net-dhcp-leases cluster-talos-net
+virsh net-dhcp-leases cluster-net
 ```
 
 ### Manual Network Management
 
 ```bash
 # Destroy (stop) the network
-virsh net-destroy cluster-talos-net
+virsh net-destroy cluster-net
 
 # Undefine (delete) the network
-virsh net-undefine cluster-talos-net
+virsh net-undefine cluster-net
 
 # Define network from XML
 virsh net-define /path/to/network.xml
@@ -87,13 +87,13 @@ Edit `.env` to customize network settings:
 
 ```bash
 # Network Configuration
-NETWORK_NAME=cluster-talos-net
-BRIDGE_NAME=talos-bridge
-NETWORK_CIDR=10.0.0.1/24
-NETWORK_IP=10.0.0.1
+NETWORK_NAME=cluster-net
+BRIDGE_NAME=cluster-bridge
+NETWORK_CIDR=192.168.123.1/24
+NETWORK_IP=192.168.123.1
 NETWORK_MASK=255.255.255.0
-DHCP_START=10.0.0.2
-DHCP_END=10.0.0.254
+DHCP_START=192.168.123.2
+DHCP_END=192.168.123.254
 FORWARD_MODE=nat
 
 # MAC Address Prefix (used for static reservations)
@@ -101,10 +101,10 @@ MAC_PREFIX=52:54:00:00:00
 
 # Node Configuration (for static IP reservations)
 MASTER_NAME=talos-master
-MASTER_IP=10.0.0.10
+MASTER_IP=192.168.123.10
 WORKER_COUNT=2
 WORKER_NAME_PREFIX=talos-worker-
-WORKER_IP_BASE=10.0.0.11
+WORKER_IP_BASE=192.168.123.20
 ```
 
 The `MAC_PREFIX` should be the first 5 octets of a MAC address (colon-separated). The script appends the last octet automatically:
@@ -163,7 +163,7 @@ sudo usermod -aG libvirt $USER
 Verify the VM's MAC address matches the reservation in the network definition:
 
 ```bash
-virsh net-dumpxml cluster-talos-net | grep -A 20 '<dhcp>'
+virsh net-dumpxml cluster-net | grep -A 20 '<dhcp>'
 ```
 
 ### MAC address conflicts

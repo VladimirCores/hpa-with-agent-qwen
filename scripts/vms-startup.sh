@@ -43,6 +43,9 @@ SKIP_CLEANUP=false
 FORCE_RESET=false
 VERBOSE=false
 
+# VM name prefix (derived from project directory name, used by vagrant-libvirt)
+VM_PREFIX="$(basename "$PROJECT_ROOT")_"
+
 while getopts "sfv" opt; do
     case $opt in
         s) SKIP_CLEANUP=true ;;
@@ -247,6 +250,13 @@ cd "$PROJECT_ROOT"
 
 echo "Starting VMs with Vagrant..."
 if vagrant up --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
+    # Check the actual exit status of vagrant up
+    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+        print_error "Vagrant failed to start VMs"
+        echo ""
+        echo "Check /tmp/vagrant-up.log for details"
+        exit 1
+    fi
     print_success "VMs started successfully"
 else
     print_error "Vagrant failed to start VMs"
@@ -259,7 +269,7 @@ fi
 echo ""
 echo "Verifying VMs..."
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
-    if virsh -c "$LIBVIRT_URI" domstate "with-agent-qwen_$vm" 2>/dev/null | grep -q "running"; then
+    if virsh -c "$LIBVIRT_URI" domstate "${VM_PREFIX}$vm" 2>/dev/null | grep -q "running"; then
         print_success "VM $vm is running"
     else
         print_error "VM $vm is not running"
@@ -311,7 +321,7 @@ echo "  2. Monitor VM status:"
 echo "     virsh -c $LIBVIRT_URI list"
 echo ""
 echo "  3. Access VM console (if needed):"
-echo "     virsh -c $LIBVIRT_URI console with-agent-qwen_$MASTER_NAME"
+echo "     virsh -c $LIBVIRT_URI console ${VM_PREFIX}$MASTER_NAME"
 echo ""
 
 exit 0

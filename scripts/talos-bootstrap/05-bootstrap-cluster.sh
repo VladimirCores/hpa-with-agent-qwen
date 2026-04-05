@@ -41,9 +41,11 @@ elif echo "$VERSION_OUTPUT" | grep -q "Server:"; then
     echo "    ./scripts/talos-bootstrap.sh"
     echo ""
     echo "  Or manually wipe disks:"
-    echo "    virsh -c qemu:///system vol-delete --pool $STORAGE_POOL with-agent-qwen_talos-master-vda.qcow2"
+    # VM prefix is dynamic based on project directory
+    VM_PREFIX="$(basename "$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")")_"
+    echo "    virsh -c qemu:///system vol-delete --pool $STORAGE_POOL ${VM_PREFIX}talos-master-vda.qcow2"
     for i in $(seq 1 $WORKER_COUNT); do
-        echo "    virsh -c qemu:///system vol-delete --pool $STORAGE_POOL with-agent-qwen_talos-worker-${i}-vda.qcow2"
+        echo "    virsh -c qemu:///system vol-delete --pool $STORAGE_POOL ${VM_PREFIX}talos-worker-${i}-vda.qcow2"
     done
     echo ""
     exit 1

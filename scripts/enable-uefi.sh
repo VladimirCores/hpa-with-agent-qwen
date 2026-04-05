@@ -4,6 +4,10 @@
 LIBVIRT_URI="qemu:///system"
 NVRAM_DIR="/var/lib/libvirt/qemu/nvram"
 
+# VM name prefix (derived from project directory name)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VM_PREFIX="$(basename "$(dirname "$SCRIPT_DIR")")_"
+
 echo "=== Enable UEFI Firmware for Talos VMs ==="
 echo ""
 
@@ -14,7 +18,7 @@ echo "NVRAM directory ready"
 echo ""
 
 # Process each VM
-for vm_name in with-agent-qwen_talos-master with-agent-qwen_talos-worker-1 with-agent-qwen_talos-worker-2; do
+for vm_name in ${VM_PREFIX}talos-master ${VM_PREFIX}talos-worker-1 ${VM_PREFIX}talos-worker-2; do
     echo "Processing: $vm_name"
     
     # Stop VM if running

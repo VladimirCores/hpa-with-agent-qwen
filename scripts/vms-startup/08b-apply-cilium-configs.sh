@@ -32,7 +32,7 @@ if [[ ! -f "$CONFIG_DIR/controlplane.yaml" ]] || [[ ! -f "$CONFIG_DIR/worker.yam
     echo "  Run talos-bootstrap.sh first to generate configs"
     echo ""
     echo "  Continuing without Cilium support..."
-    return 0
+    exit 0
 fi
 
 # Verify Cilium-ready settings in config
@@ -61,7 +61,7 @@ mapfile -t VM_IPS < <(get_dhcp_ips "$NETWORK_NAME")
 if [[ ${#VM_IPS[@]} -lt 1 ]]; then
     echo "  ERROR: No VM IPs found"
     echo "  Continuing without config apply..."
-    return 0
+    exit 0
 fi
 
 MASTER_IP="${VM_IPS[0]:-10.0.0.10}"
@@ -86,7 +86,7 @@ if [[ $CONFIG_APPLY_ELAPSED -ge $CONFIG_APPLY_WAIT ]]; then
     echo "  WARNING: Talos API not accessible after ${CONFIG_APPLY_WAIT}s"
     echo "  Talos may have already installed to disk"
     echo "  Continuing without config apply..."
-    return 0
+    exit 0
 fi
 
 # Apply configs to master

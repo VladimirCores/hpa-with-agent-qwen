@@ -59,7 +59,9 @@ if [[ "$FORWARD_MODE" == "bridge" ]]; then
     fi
     
     # Verify dnsmasq is running
-    if pgrep -f "dnsmasq.*$BRIDGE_NAME" > /dev/null; then
+    DNSMASQ_CONF_DIR="$PROJECT_ROOT/.dnsmasq"
+    DNSMASQ_CONF="$DNSMASQ_CONF_DIR/cluster.conf"
+    if [[ -f "$DNSMASQ_CONF" ]] && pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" > /dev/null; then
         echo "✓ dnsmasq is running for '$BRIDGE_NAME'"
     else
         echo "⚠ dnsmasq is not running for '$BRIDGE_NAME'"
@@ -105,25 +107,6 @@ if virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" &>/dev/null; then
         sleep 0.5
     done
     echo "  - Network removed"
-
-    # Step 4: Delete the bridge interface only for bridge mode
-    # For NAT mode, keep the bridge for reuse (avoids sudo prompts on each run)
-    if [[ "$FORWARD_MODE" == "bridge" ]]; then
-        if ip link show "$BRIDGE_NAME" &>/dev/null; then
-            echo "  - Removing bridge interface '$BRIDGE_NAME'..."
-            ip link delete "$BRIDGE_NAME" 2>/dev/null || true
-            # Wait for bridge to be fully removed
-            echo "  - Waiting for bridge interface to be removed..."
-            while ip link show "$BRIDGE_NAME" &>/dev/null; do
-                sleep 0.5
-            done
-            echo "  - Bridge removed"
-        else
-            echo "  - Bridge interface '$BRIDGE_NAME' does not exist (already cleaned up)"
-        fi
-    else
-        echo "  - Preserving bridge interface '$BRIDGE_NAME' for NAT mode reuse"
-    fi
 
     echo "Network '$NETWORK_NAME' deleted successfully."
 else

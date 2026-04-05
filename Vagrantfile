@@ -17,7 +17,7 @@ load_env
 # Box Configuration
 USE_BOX = ENV['USE_BOX'] == 'true'
 BOX_NAME = ENV['BOX_NAME'] || 'talos'
-BOX_VERSION = ENV['BOX_VERSION'] || 'v1.11.5'
+BOX_VERSION = ENV['BOX_VERSION'] || '1.12.6'
 
 # Talos Disk Image Configuration
 # ISO-based installation (traditional)

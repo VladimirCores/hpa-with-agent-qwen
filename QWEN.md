@@ -9,12 +9,12 @@ This project sets up a **Talos Linux Kubernetes cluster** using Vagrant and libv
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Talos Kubernetes Cluster                  │
-│  Network: 10.0.0.0/24 (NAT)                                  │
+│  Network: 192.168.123.0/24 (NAT)                                  │
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
 │  │   Master    │  │  Worker-1   │  │  Worker-2   │         │
-│  │ 10.0.0.10   │  │ 10.0.0.11   │  │ 10.0.0.12   │         │
-│  │ 4 CPU/4GB   │  │ 1 CPU/2GB   │  │ 1 CPU/2GB   │         │
+│  │ 192.168.123.10   │  │ 192.168.123.20   │  │ 192.168.123.21   │         │
+│  │ 4 CPU/6GB   │  │ 2 CPU/2GB   │  │ 2 CPU/2GB   │         │
 │  │ etcd, API   │  │ kubelet     │  │ kubelet     │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
 └─────────────────────────────────────────────────────────────┘
@@ -151,11 +151,11 @@ vagrant ssh talos-master
 virsh -c qemu:///system list --all
 
 # Check network
-virsh -c qemu:///system net-info cluster-talos-net
-virsh -c qemu:///system net-dhcp-leases cluster-talos-net
+virsh -c qemu:///system net-info cluster-net
+virsh -c qemu:///system net-dhcp-leases cluster-net
 
 # Check Talos cluster
-talosctl get members --nodes 10.0.0.10
+talosctl get members --nodes 192.168.123.10
 
 # Check Kubernetes
 kubectl get nodes
@@ -170,13 +170,13 @@ kubectl get pods -A
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NETWORK_NAME` | cluster-talos-net | libvirt network name |
+| `NETWORK_NAME` | cluster-net | libvirt network name |
 | `MASTER_NAME` | talos-master | Master node name |
-| `MASTER_IP` | 10.0.0.10 | Master node IP |
+| `MASTER_IP` | 192.168.123.10 | Master node IP |
 | `MASTER_CPUS` | 4 | Master CPU count |
-| `MASTER_MEMORY` | 4096 | Master memory (MB) |
+| `MASTER_MEMORY` | 6144 | Master memory (MB) |
 | `WORKER_COUNT` | 2 | Number of workers |
-| `WORKER_IP_BASE` | 10.0.0.11 | First worker IP |
+| `WORKER_IP_BASE` | 192.168.123.20 | First worker IP |
 | `WORKER_CPUS` | 1 | Worker CPU count |
 | `WORKER_MEMORY` | 2048 | Worker memory (MB) |
 | `CLUSTER_NAME` | talos-cluster | Cluster identifier |
@@ -188,18 +188,18 @@ kubectl get pods -A
 
 | Setting | Value |
 |---------|-------|
-| Network CIDR | 10.0.0.0/24 |
-| Gateway | 10.0.0.1 |
-| DHCP Range | 10.0.0.2 - 10.0.0.254 |
+| Network CIDR | 192.168.123.0/24 |
+| Gateway | 192.168.123.1 |
+| DHCP Range | 192.168.123.2 - 192.168.123.254 |
 | Forward Mode | NAT |
 
 ### Static IP Reservations
 
 | Node | IP | MAC |
 |------|-----|-----|
-| talos-master | 10.0.0.10 | `${MAC_PREFIX}:01` |
-| talos-worker-1 | 10.0.0.11 | `${MAC_PREFIX}:0b` |
-| talos-worker-2 | 10.0.0.12 | `${MAC_PREFIX}:0c` |
+| talos-master | 192.168.123.10 | `${MAC_PREFIX}:01` |
+| talos-worker-1 | 192.168.123.20 | `${MAC_PREFIX}:0b` |
+| talos-worker-2 | 192.168.123.21 | `${MAC_PREFIX}:0c` |
 
 ---
 
@@ -257,7 +257,7 @@ set +a
 ./scripts/talos-bootstrap.sh
 
 # Or manually reset
-talosctl reset --nodes 10.0.0.10 --graceful=false
+talosctl reset --nodes 192.168.123.10 --graceful=false
 ```
 
 **Bootstrap fails with certificate errors (ISO mode, Talos v1.12.x)**
@@ -286,13 +286,13 @@ sudo usermod -aG libvirt $USER  # Then log out/in
 ./scripts/prepare-network.sh
 
 # Check DHCP leases
-virsh -c qemu:///system net-dhcp-leases cluster-talos-net
+virsh -c qemu:///system net-dhcp-leases cluster-net
 ```
 
 **kubectl cannot connect**
 ```bash
 # Regenerate kubeconfig
-talosctl kubeconfig . --nodes 10.0.0.10 --force
+talosctl kubeconfig . --nodes 192.168.123.10 --force
 ```
 
 **Raw image overlays not created**

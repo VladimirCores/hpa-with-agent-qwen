@@ -6,6 +6,9 @@
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STEP_DIR/00-setup.sh"
 
+# VM name prefix (derived from project directory name)
+VM_PREFIX="$(basename "$(dirname "$(dirname "$STEP_DIR")")")_"
+
 echo "[7/10] Replacing VM disks with CoW overlays..."
 
 # Check if using raw image mode
@@ -85,7 +88,7 @@ fi
 # Function to replace volume with CoW overlay
 replace_with_overlay() {
     local vm_name="$1"
-    local volume_name="with-agent-qwen_${vm_name}-vda.qcow2"
+    local volume_name="${VM_PREFIX}${vm_name}-vda.qcow2"
     local volume_path="$POOL_PATH/$volume_name"
     local temp_path="$POOL_PATH/${volume_name}.tmp"
     
@@ -142,7 +145,7 @@ replace_with_overlay() {
 echo ""
 echo "  Stopping VMs for disk replacement..."
 for vm_name in "$MASTER_NAME" $(for i in $(seq 1 $WORKER_COUNT); do echo "${WORKER_NAME_PREFIX}${i}"; done); do
-    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "with-agent-qwen_${vm_name}" | awk '{print $2}' | head -1)
+    ACTUAL_VM=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep -E "${VM_PREFIX}${vm_name}" | awk '{print $2}' | head -1)
     if [[ -n "$ACTUAL_VM" ]]; then
         echo "    Stopping: $ACTUAL_VM"
         virsh -c "$LIBVIRT_URI" destroy "$ACTUAL_VM" 2>/dev/null || true

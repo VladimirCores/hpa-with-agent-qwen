@@ -17,6 +17,14 @@
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STEP_DIR/00-setup.sh"
 
+# Detect QEMU machine type dynamically
+detect_machine_type() {
+    local machine
+    machine=$(virsh -c "$LIBVIRT_URI" capabilities 2>/dev/null | grep -m1 "<machine canonical=" | sed 's/.*canonical='"'"'\([^'"'"']*\)'"'"'.*/\1/')
+    echo "${machine:-pc-i440fx-10.1}"  # Fallback if detection fails
+}
+QEMU_MACHINE="$(detect_machine_type)"
+
 # Configuration
 OVMF_CODE="/usr/share/OVMF/OVMF_CODE.fd"
 OVMF_VARS="/usr/share/OVMF/OVMF_VARS.fd"
@@ -90,7 +98,7 @@ configure_uefi() {
   <memory unit="KiB">${memory_mb}024</memory>
   <vcpu>$vcpus</vcpu>
   <os>
-    <type arch="x86_64" machine="pc-i440fx-10.1">hvm</type>
+    <type arch="x86_64" machine="$QEMU_MACHINE">hvm</type>
     <loader readonly="yes" type="pflash" secure="no">$OVMF_CODE</loader>
     <nvram>$nvram_path</nvram>
   </os>
@@ -129,7 +137,7 @@ VMXML
   <memory unit="KiB">${memory_mb}024</memory>
   <vcpu>$vcpus</vcpu>
   <os>
-    <type arch="x86_64" machine="pc-i440fx-10.1">hvm</type>
+    <type arch="x86_64" machine="$QEMU_MACHINE">hvm</type>
     <loader readonly="yes" type="pflash" secure="no">$OVMF_CODE</loader>
     <nvram>$nvram_path</nvram>
   </os>
@@ -190,8 +198,8 @@ echo ""
 echo "Checking VM UEFI configuration..."
 echo ""
 
-# VM names include vagrant-libvirt prefix
-VAGRANT_PREFIX="with-agent-qwen_"
+# VM names include vagrant-libvirt prefix (derived from project directory)
+VAGRANT_PREFIX="$(basename "$(dirname "$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)")")")_"
 MASTER_VM_NAME="${VAGRANT_PREFIX}${MASTER_NAME}"
 MASTER_DISK_PATH="$POOL_PATH/${MASTER_VM_NAME}-vda.qcow2"
 

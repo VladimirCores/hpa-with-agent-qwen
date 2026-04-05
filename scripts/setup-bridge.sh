@@ -170,8 +170,7 @@ cat > "$DNSMASQ_CONF" <<EOF
 interface=$BRIDGE_NAME
 except-interface=lo
 port=0
-dhcp-range=$NETWORK_IP,proxy,$NETWORK_MASK
-leasefile-ro
+dhcp-range=$DHCP_START,$DHCP_END,$NETWORK_MASK,12h
 pid-file=$DNSMASQ_PIDFILE
 
 # Static IP reservations
@@ -184,8 +183,9 @@ EOF
 print_success "dnsmasq configuration created: $DNSMASQ_CONF"
 
 # Check if dnsmasq is already running for this bridge
-if pgrep -f "dnsmasq.*$BRIDGE_NAME" > /dev/null; then
-    echo "  ✓ dnsmasq is already running for $BRIDGE_NAME (PID: $(pgrep -f "dnsmasq.*$BRIDGE_NAME"))"
+if pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF" > /dev/null; then
+    DNSMASQ_PID=$(cat "$DNSMASQ_PIDFILE" 2>/dev/null || pgrep -f "dnsmasq.*--conf-file.*$DNSMASQ_CONF")
+    echo "  ✓ dnsmasq is already running for $BRIDGE_NAME (PID: $DNSMASQ_PID)"
     exit 0
 fi
 
@@ -195,8 +195,8 @@ sudo dnsmasq --conf-file="$DNSMASQ_CONF" --pid-file="$DNSMASQ_PIDFILE"
 
 sleep 2
 
-if pgrep -f "dnsmasq.*$BRIDGE_NAME" > /dev/null; then
-    print_success "dnsmasq started (PID: $(pgrep -f "dnsmasq.*$BRIDGE_NAME"))"
+if [[ -f "$DNSMASQ_PIDFILE" ]] && kill -0 "$(cat "$DNSMASQ_PIDFILE")" 2>/dev/null; then
+    print_success "dnsmasq started (PID: $(cat "$DNSMASQ_PIDFILE"))"
 else
     print_error "Failed to start dnsmasq"
     exit 1

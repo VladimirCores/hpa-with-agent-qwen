@@ -2,6 +2,8 @@
 # Common setup for all vms-startup steps
 # Sources .env file and sets up common variables
 
+set -euo pipefail
+
 # Get script directory and project root
 # STEP_DIR is the directory of the current step script
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

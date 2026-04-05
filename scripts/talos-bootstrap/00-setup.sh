@@ -6,6 +6,8 @@
 # Sources .env file and sets up common variables.
 # =============================================================================
 
+set -euo pipefail
+
 # Get script directory and project root
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$STEP_DIR")")"
