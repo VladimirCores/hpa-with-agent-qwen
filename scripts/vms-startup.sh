@@ -227,16 +227,10 @@ print_success "Network verification passed (from step script)"
 if [[ "$SKIP_CLEANUP" != "true" ]]; then
     print_header "Step 5/8: Cleanup Existing VMs"
 
-    run_step "5" "Cleaning up existing VMs" "$STEPS_DIR/06-cleanup-vms.sh" \
-        SKIP_CLEANUP="$SKIP_CLEANUP" \
-        NETWORK_NAME="$NETWORK_NAME" \
-        MASTER_NAME="$MASTER_NAME" \
-        WORKER_COUNT="$WORKER_COUNT" \
-        WORKER_NAME_PREFIX="$WORKER_NAME_PREFIX" \
-        STORAGE_POOL="$STORAGE_POOL" \
-        LIBVIRT_URI="$LIBVIRT_URI" \
-        USE_RAW_IMAGE="${USE_RAW_IMAGE:-false}" \
-        PROJECT_ROOT="$PROJECT_ROOT"
+    # Export variables for the cleanup script subprocess
+    export SKIP_CLEANUP NETWORK_NAME MASTER_NAME WORKER_COUNT WORKER_NAME_PREFIX STORAGE_POOL LIBVIRT_URI USE_RAW_IMAGE PROJECT_ROOT
+    
+    run_step "5" "Cleaning up existing VMs" "$STEPS_DIR/06-cleanup-vms.sh"
     STEP5_RAN=true
 else
     print_header "Step 5/8: Skip Cleanup (requested)"
@@ -248,7 +242,7 @@ fi
 echo ""
 echo "Verifying VMs are removed from libvirt..."
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
-    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
+    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1 || true)
     if [[ -n "$actual_vm" ]]; then
         echo "  WARNING: $actual_vm still exists after step 5 cleanup"
     fi
@@ -267,7 +261,7 @@ cd "$PROJECT_ROOT"
 echo "Checking for existing VMs in libvirt..."
 found_any=false
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
-    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
+    actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1 || true)
     if [[ -n "$actual_vm" ]]; then
         found_any=true
         echo "  Found: $actual_vm - removing..."
