@@ -249,38 +249,35 @@ print_header "Step 6/8: Start VMs"
 
 cd "$PROJECT_ROOT"
 
-# Check VM state: compare Vagrant status with libvirt
-need_cleanup=false
+# Always remove any existing VMs from libvirt before vagrant up
+# This prevents "domain already taken" errors when VMs exist in libvirt
+# but Vagrant state is out of sync (shutoff, saved, etc.)
+echo "Checking for existing VMs in libvirt..."
+found_any=false
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
-    # Check libvirt
     actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
-    
-    # Check vagrant status
-    vm_status=$(vagrant status "$vm" 2>/dev/null | grep -E "not created|running|saved|poweroff" | awk '{print $2}' | head -1)
-    
-    if [[ -n "$actual_vm" ]] && [[ "$vm_status" != "running" ]]; then
-        # VM exists in libvirt but Vagrant doesn't see it as running
-        # This happens when VMs were created outside Vagrant or state is out of sync
-        need_cleanup=true
-        echo "  Orphaned VM found: $actual_vm (Vagrant status: $vm_status)"
+    if [[ -n "$actual_vm" ]]; then
+        found_any=true
+        echo "  Found: $actual_vm"
     fi
 done
 
-if [[ "$need_cleanup" == "true" ]]; then
+if [[ "$found_any" == "true" ]]; then
     echo ""
-    echo "  Cleaning up orphaned VMs from libvirt..."
+    echo "  Removing existing VMs from libvirt..."
     for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
         actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1)
         if [[ -n "$actual_vm" ]]; then
             echo "    Destroying: $actual_vm"
             run_sudo virsh -c "$LIBVIRT_URI" destroy "$actual_vm" 2>/dev/null || true
-            run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" 2>/dev/null || true
-            # Also remove disk if exists
+            run_sudo virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage 2>/dev/null || true
+            # Fallback: remove disk manually if --remove-all-storage fails
             disk_name="${actual_vm}-vda.raw"
             run_sudo virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$disk_name" 2>/dev/null || true
+            echo "    ✓ Removed $actual_vm"
         fi
     done
-    echo "  ✓ Orphaned VMs cleaned up"
+    echo "  ✓ All existing VMs removed"
     echo ""
 fi
 
@@ -288,15 +285,6 @@ echo "Starting VMs with Vagrant..."
 if vagrant up --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
     # Check the actual exit status of vagrant up
     if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-        # Check if error is about existing domains
-        if grep -q "already taken" /tmp/vagrant-up.log 2>/dev/null; then
-            print_error "VM domains already exist in libvirt"
-            echo ""
-            echo "Existing VMs found but not managed by Vagrant. Options:"
-            echo "  1. Run with -f flag to force cleanup and recreate"
-            echo "  2. Manually destroy: virsh -c $LIBVIRT_URI undefine --remove-all-storage <vm-name>"
-            exit 1
-        fi
         print_error "Vagrant failed to start VMs"
         echo ""
         echo "Check /tmp/vagrant-up.log for details"
