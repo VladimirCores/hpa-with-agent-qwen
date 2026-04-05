@@ -204,7 +204,7 @@ run_step "3" "Creating storage pool" "$STEPS_DIR/04-create-storage-pool.sh" \
 
 # Verify storage pool
 verify_step "Storage pool exists" \
-    "virsh -c '$LIBVIRT_URI' pool-info '$STORAGE_POOL'"
+    "virsh -c \"$LIBVIRT_URI\" pool-info \"$STORAGE_POOL\""
 
 # =============================================================================
 # Step 4: Setup Network

@@ -71,7 +71,7 @@ else
 fi
 
 # Verify pool is active
-if virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" 2>/dev/null | grep -qE "State:.*running"; then
+if virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" 2>/dev/null | grep -qi "running"; then
     echo "  ✓ Storage pool is active"
 else
     echo "  ERROR: Storage pool is not active"
