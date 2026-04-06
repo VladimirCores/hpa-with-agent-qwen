@@ -86,7 +86,11 @@ step_08_configure_kubectl() {
     bash "$STEPS_DIR/08-configure-kubectl.sh"
 }
 
-step_09_cluster_verify() {
+step_09_install_dashboard() {
+    bash "$STEPS_DIR/09-install-dashboard.sh"
+}
+
+step_10_cluster_verify() {
     bash "$STEPS_DIR/09-cluster-verify.sh"
 }
 
@@ -119,7 +123,8 @@ run_step_sync "05: Bootstrap cluster" "step_05_bootstrap_cluster"
 run_step_sync "06: Apply configs" "step_06_apply_configs"
 run_step_sync "07: Verify bootstrap" "step_07_verify_bootstrap"
 run_step_sync "08: Configure kubectl" "step_08_configure_kubectl"
-run_step_sync "09: Cluster verification" "step_09_cluster_verify"
+run_step_sync "09: Install Kubernetes Dashboard" "step_09_install_dashboard"
+run_step_sync "10: Cluster verification" "step_10_cluster_verify"
 
 # Summary
 echo "=== Bootstrap Summary ==="
@@ -136,9 +141,14 @@ echo "  - talosconfig"
 echo "  - kubeconfig"
 echo ""
 echo "Next steps:"
-echo "  1. Install Kubernetes components:"
+echo "  1. Access Kubernetes Dashboard:"
+echo "     kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443"
+echo "     Open: https://localhost:8443"
+echo "     Token: $CONFIG_DIR/dashboard-admin-token.txt"
+echo ""
+echo "  2. Install Kubernetes components:"
 echo "     ./scripts/k8s-components.sh"
-echo "  2. Verify cluster:"
+echo "  3. Verify cluster:"
 echo "     kubectl get nodes"
 echo "     kubectl get pods -A"
 echo ""
