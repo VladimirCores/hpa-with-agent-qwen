@@ -25,12 +25,31 @@ echo "  Checking node maintenance mode..."
 # Talos v1.12.x: Use version command to detect maintenance mode
 # In maintenance mode: "API is not implemented in maintenance mode"
 # In cluster mode: Returns actual version info
-VERSION_OUTPUT=$(talosctl version --nodes "$MASTER_IP" --insecure 2>&1)
+# Use explicit --endpoints since talosconfig may have empty endpoints
+# Note: talosctl returns non-zero in maintenance mode, so use || true
+VERSION_OUTPUT=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure 2>&1 || true)
 
 if echo "$VERSION_OUTPUT" | grep -q "API is not implemented in maintenance mode"; then
     echo "  ✓ Node is in maintenance mode (Talos v1.12.x)"
-elif echo "$VERSION_OUTPUT" | grep -q "Server:"; then
-    echo "  ERROR: Node is NOT in maintenance mode (cluster mode detected)"
+    echo "  Applying config before bootstrap..."
+    talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1 || true
+    echo "  Waiting for node to reboot after config apply..."
+    sleep 30
+    # Fix endpoints in talosconfig
+    sed -i 's/endpoints: \[\]/endpoints: ['$MASTER_IP']/g' "$CONFIG_DIR/talosconfig"
+    # Wait for node to come back up
+    for i in $(seq 1 20); do
+        if talosctl version --nodes "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Server:"; then
+            echo "  ✓ Node is back online"
+            break
+        fi
+        echo "  Waiting for node... (${i}s)"
+        sleep 3
+    done
+elif echo "$VERSION_OUTPUT" | grep -q "PermissionDenied"; then
+    echo "  ✓ Node is in cluster mode but not bootstrapped"
+    echo "  Attempting bootstrap..."
+else
     echo ""
     echo "  Talos v1.12.x requires EMPTY disk to boot into maintenance mode."
     echo "  The disk has existing Talos state."
@@ -49,15 +68,13 @@ elif echo "$VERSION_OUTPUT" | grep -q "Server:"; then
     done
     echo ""
     exit 1
-else
-    echo "  WARNING: Unexpected response: $VERSION_OUTPUT"
-    echo "  Proceeding anyway..."
 fi
 
 # Perform bootstrap
 echo "  Bootstrapping cluster on $MASTER_NAME ($MASTER_IP)..."
 
-if talosctl bootstrap --nodes "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig"; then
+# Bootstrap with explicit endpoints (no --insecure flag for bootstrap in v1.12)
+if talosctl bootstrap --nodes "$MASTER_IP" --endpoints "$MASTER_IP" 2>&1; then
     echo "  ✓ Kubernetes cluster bootstrapped"
 else
     echo "  ERROR: Bootstrap failed"

@@ -85,6 +85,8 @@ if grep -q "disk: /dev/vda" "$CONFIG_DIR/worker.yaml"; then
 fi
 
 # Extract certificates for reference (non-critical, skip if fails)
+# Disable strict error handling for this optional step
+set +e
 echo ""
 echo "  Extracting certificates..."
 
@@ -170,8 +172,10 @@ extract_certs_from_yaml() {
 extract_certs_from_yaml "$CONFIG_DIR/controlplane.yaml" "$CERTS_DIR" 2>/dev/null || true
 
 # Count extracted files
-cert_count=$(ls -1 "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key 2>/dev/null | wc -l || echo "0")
-if [[ "$cert_count" -gt 0 ]]; then
+cert_count=$(ls -1 "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key 2>/dev/null | wc -l)
+cert_count=${cert_count:-0}
+cert_count=$(echo "$cert_count" | tr -d '[:space:]')
+if [[ "$cert_count" -gt 0 ]] 2>/dev/null; then
     echo "  Extracted $cert_count certificate files"
     echo ""
     echo "  Certificate files:"
@@ -180,6 +184,9 @@ if [[ "$cert_count" -gt 0 ]]; then
 else
     echo "  ℹ Certificate extraction skipped (not required for bootstrap)"
 fi
+
+# Re-enable strict error handling
+set -euo pipefail
 
 echo ""
 echo "  ✓ Machine configurations ready"
