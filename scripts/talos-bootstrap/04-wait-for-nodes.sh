@@ -1,50 +1,64 @@
 #!/bin/bash
 # =============================================================================
-# Step 04: Wait for Nodes to be Ready
+# Step 04: Wait for Nodes
 # =============================================================================
-# Waits for all Talos nodes to be accessible via the Talos API.
-# Uses --insecure flag for pre-bootstrap connection.
+# Waits for all Talos nodes to be accessible and responsive.
 # =============================================================================
 
-# Source common setup
+set -euo pipefail
+
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STEP_DIR/00-setup.sh"
 
 echo "[4/9] Waiting for nodes to be ready..."
+echo "  Target nodes:"
+echo "    - Master: $MASTER_NAME ($MASTER_IP)"
+echo "    - Workers: $WORKER_COUNT nodes ($WORKER_IP_BASE)"
+echo "  Timeout: 120s"
+echo ""
 
-MAX_WAIT=120
-
-# Wait for master node
+# Wait for master
 echo "  Waiting for master ($MASTER_IP)..."
-WAITED=0
-while ! talosctl get version --nodes "$MASTER_IP" --insecure &>/dev/null; do
-    if (( WAITED >= MAX_WAIT )); then
-        echo "ERROR: Master not responding after ${MAX_WAIT}s"
-        exit 1
+MASTER_WAIT=0
+while [[ $MASTER_WAIT -lt 120 ]]; do
+    if talosctl version --nodes "$MASTER_IP" --insecure 2>&1 | grep -q "v1\."; then
+        echo "  ✓ Master ready (${MASTER_WAIT}s)"
+        break
     fi
+    echo "    ... waiting (${MASTER_WAIT}s)"
     sleep 2
-    WAITED=$((WAITED + 2))
-    echo "    ... waiting ($WAITED/${MAX_WAIT}s)"
+    MASTER_WAIT=$((MASTER_WAIT + 2))
 done
-echo "  ✓ Master ready (${WAITED}s)"
 
-# Wait for worker nodes
+if [[ $MASTER_WAIT -ge 120 ]]; then
+    echo "ERROR: Master not responding after 120s"
+    echo "  Check VM status: virsh -c $LIBVIRT_URI list | grep talos"
+    echo "  Check DHCP: virsh -c $LIBVIRT_URI net-dhcp-leases $NETWORK_NAME"
+    exit 1
+fi
+
+# Wait for workers
 for i in $(seq 1 $WORKER_COUNT); do
-    WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
+    WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     
     echo "  Waiting for $WORKER_NAME ($WORKER_IP)..."
-    WAITED=0
-    while ! talosctl get version --nodes "$WORKER_IP" --insecure &>/dev/null; do
-        if (( WAITED >= MAX_WAIT )); then
-            echo "ERROR: $WORKER_NAME not responding after ${MAX_WAIT}s"
-            exit 1
+    WORKER_WAIT=0
+    while [[ $WORKER_WAIT -lt 120 ]]; do
+        if talosctl version --nodes "$WORKER_IP" --insecure 2>&1 | grep -q "v1\."; then
+            echo "  ✓ $WORKER_NAME ready (${WORKER_WAIT}s)"
+            break
         fi
+        echo "    ... waiting (${WORKER_WAIT}s)"
         sleep 2
-        WAITED=$((WAITED + 2))
-        echo "    ... waiting ($WAITED/${MAX_WAIT}s)"
+        WORKER_WAIT=$((WORKER_WAIT + 2))
     done
-    echo "  ✓ $WORKER_NAME ready (${WAITED}s)"
+    
+    if [[ $WORKER_WAIT -ge 120 ]]; then
+        echo "ERROR: $WORKER_NAME not responding after 120s"
+        echo "  Check VM: virsh -c $LIBVIRT_URI dominfo $WORKER_NAME"
+        exit 1
+    fi
 done
 
 echo ""

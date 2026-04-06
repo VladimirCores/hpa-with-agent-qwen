@@ -1,16 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# Step 06: Apply Talos Configurations
+# Step 06: Apply Machine Configurations
 # =============================================================================
-# Applies the control plane and worker configurations to all nodes.
-# Uses --insecure flag for pre-reboot connection.
+# Applies machine configurations to all nodes.
+# Must be done AFTER bootstrap and nodes must be accessible.
 # =============================================================================
 
-# Source common setup
+set -euo pipefail
+
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STEP_DIR/00-setup.sh"
 
-echo "[6/9] Applying Talos configurations..."
+echo "[6/9] Applying machine configurations..."
+echo ""
 
 # Verify config files exist
 if [[ ! -f "$CONFIG_DIR/controlplane.yaml" ]] || [[ ! -f "$CONFIG_DIR/worker.yaml" ]]; then
@@ -19,45 +21,31 @@ if [[ ! -f "$CONFIG_DIR/controlplane.yaml" ]] || [[ ! -f "$CONFIG_DIR/worker.yam
     exit 1
 fi
 
-# Verify install disk configuration
-echo ""
-echo "  Verifying install disk configuration..."
-INSTALL_DISK=$(grep "^        disk:" "$CONFIG_DIR/controlplane.yaml" | head -1 | awk '{print $2}')
-if [[ "$INSTALL_DISK" == "/dev/vda" ]]; then
-    echo "  ✓ Install disk correctly set to /dev/vda (libvirt virtio)"
-elif [[ "$INSTALL_DISK" == "/dev/sda" ]]; then
-    echo "  WARNING: Install disk is /dev/sda, but libvirt virtio uses /dev/vda"
-    echo "  Run step 03 to regenerate configs with correct disk"
-    exit 1
-else
-    echo "  ✓ Install disk set to: $INSTALL_DISK"
-fi
-echo ""
-
-# Apply to control plane
+# Apply controlplane config
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
-if talosctl apply-config --nodes "$MASTER_IP" --file "$CONFIG_DIR/controlplane.yaml" --insecure; then
+if talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --file "$CONFIG_DIR/controlplane.yaml" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1; then
     echo "  ✓ Controlplane config applied"
 else
-    echo "  ERROR: Failed to apply controlplane config"
+    echo "  ✗ Failed to apply controlplane config"
     exit 1
 fi
 
-# Apply to workers
+echo ""
+
+# Apply worker configs
 for i in $(seq 1 $WORKER_COUNT); do
-    WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     WORKER_NAME="${WORKER_NAME_PREFIX}${i}"
+    WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
     
     echo "  Applying worker config to $WORKER_NAME ($WORKER_IP)..."
-    if talosctl apply-config --nodes "$WORKER_IP" --file "$CONFIG_DIR/worker.yaml" --insecure; then
-        echo "  ✓ Worker config applied to $WORKER_NAME"
+    if talosctl apply-config --nodes "$WORKER_IP" --endpoints "$WORKER_IP" --file "$CONFIG_DIR/worker.yaml" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1; then
+        echo "  ✓ $WORKER_NAME config applied"
     else
-        echo "  ERROR: Failed to apply worker config to $WORKER_NAME"
+        echo "  ✗ Failed to apply $WORKER_NAME config"
         exit 1
     fi
+    echo ""
 done
 
-echo ""
-echo "  ✓ All configurations applied"
-echo "  Note: Nodes will reboot to apply new configuration"
+echo "  ✓ All machine configurations applied"
 echo ""
