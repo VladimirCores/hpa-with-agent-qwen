@@ -28,18 +28,11 @@ CONFIG_DIR="${CONFIG_DIR:-$PROJECT_ROOT/talos-cluster}"
 export CONFIG_DIR
 
 # Parse arguments
-MERGE_KUBECONFIG=true
 CUSTOM_CLUSTER_NAME=""
-while getopts "n:-:" opt; do
+while getopts "n:" opt; do
     case $opt in
         n) CUSTOM_CLUSTER_NAME="$OPTARG" ;;
-        -)
-            case "${OPTARG}" in
-                no-merge) MERGE_KUBECONFIG=false ;;
-                *) echo "Unknown option: --${OPTARG}"; exit 1 ;;
-            esac
-            ;;
-        *) echo "Usage: $0 [-n cluster-name] [--no-merge]"; exit 1 ;;
+        *) echo "Usage: $0 [-n cluster-name]"; exit 1 ;;
     esac
 done
 
@@ -49,7 +42,6 @@ if [[ -n "$CUSTOM_CLUSTER_NAME" ]]; then
 fi
 
 # Export for step scripts
-export MERGE_KUBECONFIG
 export CLUSTER_NAME
 
 echo "=== Talos Cluster Bootstrap ==="
@@ -91,7 +83,6 @@ step_07_verify_bootstrap() {
 }
 
 step_08_configure_kubectl() {
-    MERGE_KUBECONFIG="$MERGE_KUBECONFIG" \
     bash "$STEPS_DIR/08-configure-kubectl.sh"
 }
 

@@ -3,6 +3,7 @@
 # Step 08: Configure kubectl
 # =============================================================================
 # Downloads kubeconfig from the cluster and configures kubectl.
+# Always overwrites existing kubeconfig to avoid interactive prompts.
 # =============================================================================
 
 set -euo pipefail
@@ -10,17 +11,23 @@ set -euo pipefail
 STEP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STEP_DIR/00-setup.sh"
 
-# Check if merge was requested
-MERGE_KUBECONFIG="${MERGE_KUBECONFIG:-false}"
+# Always use a unique context name to avoid merge conflicts
+CONTEXT_NAME="${CLUSTER_NAME:-talos-cluster}"
 
 echo "[8/9] Configuring kubectl..."
 echo "  Master: $MASTER_NAME ($MASTER_IP)"
-echo "  Merge with local kubeconfig: $MERGE_KUBECONFIG"
+echo "  Context: $CONTEXT_NAME"
 echo ""
 
-# Download kubeconfig
+# Download kubeconfig (always overwrite)
 echo "  Downloading kubeconfig from cluster..."
-if talosctl kubeconfig --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --force "$CONFIG_DIR/kubeconfig" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1; then
+if talosctl kubeconfig \
+    --nodes "$MASTER_IP" \
+    --endpoints "$MASTER_IP" \
+    --force \
+    --force-context-name "$CONTEXT_NAME" \
+    "$CONFIG_DIR/kubeconfig" \
+    --talosconfig "$CONFIG_DIR/talosconfig" 2>&1; then
     echo "  ✓ Kubeconfig downloaded to: $CONFIG_DIR/kubeconfig"
 else
     echo "  ERROR: Failed to download kubeconfig"
@@ -30,14 +37,6 @@ else
 fi
 
 echo ""
-
-# Optionally merge with local kubeconfig
-if [[ "$MERGE_KUBECONFIG" == "true" ]]; then
-    echo "  Merging with local kubeconfig..."
-    talosctl kubeconfig --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --merge --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true
-    echo "  ✓ Merged with local kubeconfig"
-    echo ""
-fi
 
 # Verify kubectl works
 echo "  Verifying kubectl access..."
