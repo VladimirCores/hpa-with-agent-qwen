@@ -21,35 +21,27 @@ echo ""
 echo "  Checking if dashboard is already installed..."
 if KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get namespace kubernetes-dashboard >/dev/null 2>&1; then
     echo "  ✓ Kubernetes Dashboard namespace already exists"
-    echo "  Skipping installation"
     echo ""
-    echo "  To access dashboard:"
-    echo "    kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443"
-    echo "    Then open: https://localhost:8443"
-    echo "    Use the admin token from: $CONFIG_DIR/dashboard-admin-token.txt"
-    echo ""
-    exit 0
-fi
-
-# Install Kubernetes Dashboard
-echo "  Phase 1: Installing Kubernetes Dashboard..."
-echo "  Applying dashboard manifest..."
-
-DASHBOARD_URL="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml"
-
-if KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl apply -f "$DASHBOARD_URL" 2>&1; then
-    echo "  ✓ Dashboard manifest applied"
 else
-    echo "  ERROR: Failed to apply dashboard manifest"
-    exit 1
-fi
+    # Install Kubernetes Dashboard
+    echo "  Phase 1: Installing Kubernetes Dashboard..."
+    echo "  Applying dashboard manifest..."
 
-echo ""
+    DASHBOARD_URL="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml"
 
-# Create admin user
-echo "  Phase 2: Creating admin user with cluster-admin privileges..."
+    if KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl apply -f "$DASHBOARD_URL" 2>&1; then
+        echo "  ✓ Dashboard manifest applied"
+    else
+        echo "  ERROR: Failed to apply dashboard manifest"
+        exit 1
+    fi
 
-cat <<EOF | KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl apply -f -
+    echo ""
+
+    # Create admin user
+    echo "  Phase 2: Creating admin user with cluster-admin privileges..."
+
+    cat <<EOF | KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl apply -f -
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -70,99 +62,119 @@ subjects:
   namespace: kubernetes-dashboard
 EOF
 
-echo "  ✓ Admin user created with cluster-admin role"
-echo ""
+    echo "  ✓ Admin user created with cluster-admin role"
+    echo ""
 
-# Get admin token
-echo "  Phase 3: Retrieving admin token..."
-TOKEN_WAIT=0
-TOKEN_TIMEOUT=60
+    # Get admin token
+    echo "  Phase 3: Retrieving admin token..."
+    TOKEN_WAIT=0
+    TOKEN_TIMEOUT=60
 
-while [[ $TOKEN_WAIT -lt $TOKEN_TIMEOUT ]]; do
-    TOKEN=$(KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl -n kubernetes-dashboard create token admin-user 2>/dev/null || true)
-    
-    if [[ -n "$TOKEN" ]]; then
-        echo "  ✓ Admin token retrieved (${TOKEN_WAIT}s)"
-        break
+    while [[ $TOKEN_WAIT -lt $TOKEN_TIMEOUT ]]; do
+        TOKEN=$(KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl -n kubernetes-dashboard create token admin-user 2>/dev/null || true)
+        
+        if [[ -n "$TOKEN" ]]; then
+            echo "  ✓ Admin token retrieved (${TOKEN_WAIT}s)"
+            break
+        fi
+        
+        if [[ $((TOKEN_WAIT % 10)) -eq 0 ]]; then
+            echo "    Waiting for token... (${TOKEN_WAIT}s)"
+        fi
+        
+        sleep 5
+        TOKEN_WAIT=$((TOKEN_WAIT + 5))
+    done
+
+    if [[ -z "$TOKEN" ]]; then
+        echo "  WARNING: Could not retrieve admin token"
+        echo "  You can get it later with:"
+        echo "    kubectl -n kubernetes-dashboard create token admin-user"
+    else
+        # Save token to file
+        echo "$TOKEN" > "$CONFIG_DIR/dashboard-admin-token.txt"
+        chmod 600 "$CONFIG_DIR/dashboard-admin-token.txt"
+        echo "  ✓ Token saved to: $CONFIG_DIR/dashboard-admin-token.txt"
     fi
-    
-    if [[ $((TOKEN_WAIT % 10)) -eq 0 ]]; then
-        echo "    Waiting for token... (${TOKEN_WAIT}s)"
-    fi
-    
-    sleep 5
-    TOKEN_WAIT=$((TOKEN_WAIT + 5))
-done
 
-if [[ -z "$TOKEN" ]]; then
-    echo "  WARNING: Could not retrieve admin token"
-    echo "  You can get it later with:"
-    echo "    kubectl -n kubernetes-dashboard create token admin-user"
-else
-    # Save token to file
-    echo "$TOKEN" > "$CONFIG_DIR/dashboard-admin-token.txt"
-    chmod 600 "$CONFIG_DIR/dashboard-admin-token.txt"
-    echo "  ✓ Token saved to: $CONFIG_DIR/dashboard-admin-token.txt"
-fi
+    echo ""
 
-echo ""
+    # Wait for dashboard pod to be running
+    echo "  Phase 4: Waiting for dashboard pods to be ready..."
+    POD_WAIT=0
+    POD_TIMEOUT=120
 
-# Wait for dashboard pod to be running
-echo "  Phase 4: Waiting for dashboard pods to be ready..."
-POD_WAIT=0
-POD_TIMEOUT=120
+    while [[ $POD_WAIT -lt $POD_TIMEOUT ]]; do
+        POD_STATUS=$(KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get pods -n kubernetes-dashboard --no-headers 2>&1 || true)
+        RUNNING=$(echo "$POD_STATUS" | grep -c "Running" 2>/dev/null || echo "0")
+        RUNNING=$(echo "$RUNNING" | tr -d '[:space:]')
+        TOTAL=$(echo "$POD_STATUS" | grep -c "." 2>/dev/null || echo "0")
+        TOTAL=$(echo "$TOTAL" | tr -d '[:space:]')
+        
+        if [[ $RUNNING -ge $TOTAL ]] && [[ $TOTAL -gt 0 ]]; then
+            echo "  ✓ All $TOTAL dashboard pods Running (${POD_WAIT}s)"
+            echo ""
+            echo "  Dashboard pods:"
+            KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get pods -n kubernetes-dashboard 2>&1 | while IFS= read -r line; do
+                echo "    $line"
+            done
+            break
+        fi
+        
+        # Show progress
+        PENDING=$((TOTAL - RUNNING))
+        if [[ $((POD_WAIT % 15)) -eq 0 ]]; then
+            echo "    Pods: $RUNNING Running, $PENDING Pending (${POD_WAIT}s)"
+        fi
+        
+        sleep 5
+        POD_WAIT=$((POD_WAIT + 5))
+    done
 
-while [[ $POD_WAIT -lt $POD_TIMEOUT ]]; do
-    POD_STATUS=$(KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get pods -n kubernetes-dashboard --no-headers 2>&1 || true)
-    RUNNING=$(echo "$POD_STATUS" | grep -c "Running" 2>/dev/null || echo "0")
-    RUNNING=$(echo "$RUNNING" | tr -d '[:space:]')
-    TOTAL=$(echo "$POD_STATUS" | grep -c "." 2>/dev/null || echo "0")
-    TOTAL=$(echo "$TOTAL" | tr -d '[:space:]')
-    
-    if [[ $RUNNING -ge $TOTAL ]] && [[ $TOTAL -gt 0 ]]; then
-        echo "  ✓ All $TOTAL dashboard pods Running (${POD_WAIT}s)"
-        echo ""
-        echo "  Dashboard pods:"
+    if [[ $POD_WAIT -ge $POD_TIMEOUT ]]; then
+        echo "  WARNING: Not all dashboard pods running after ${POD_TIMEOUT}s"
+        echo "  Current pod status:"
         KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get pods -n kubernetes-dashboard 2>&1 | while IFS= read -r line; do
             echo "    $line"
         done
-        break
     fi
-    
-    # Show progress
-    PENDING=$((TOTAL - RUNNING))
-    if [[ $((POD_WAIT % 15)) -eq 0 ]]; then
-        echo "    Pods: $RUNNING Running, $PENDING Pending (${POD_WAIT}s)"
-    fi
-    
-    sleep 5
-    POD_WAIT=$((POD_WAIT + 5))
-done
 
-if [[ $POD_WAIT -ge $POD_TIMEOUT ]]; then
-    echo "  WARNING: Not all dashboard pods running after ${POD_TIMEOUT}s"
-    echo "  Current pod status:"
-    KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get pods -n kubernetes-dashboard 2>&1 | while IFS= read -r line; do
-        echo "    $line"
-    done
+    echo ""
 fi
+
+# Expose dashboard via NodePort for direct host access (always do this)
+echo "  Phase 5: Exposing dashboard via NodePort for direct access..."
+echo "  Patching kubernetes-dashboard service to NodePort type..."
+
+KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard -p '{"spec":{"type":"NodePort","ports":[{"port":443,"targetPort":8443,"nodePort":30443}]}}' 2>/dev/null || true
+
+echo "  ✓ Dashboard exposed on NodePort 30443"
+echo ""
+
+# Get VM IPs for access instructions (from .env)
+echo "  Retrieving node IP addresses..."
+MASTER_VM_IP="${MASTER_IP:-192.168.123.10}"
+WORKER1_IP=$(echo "$WORKER_IP_BASE" | awk -F. '{print $1"."$2"."$3"."$4}')
+WORKER2_IP=$(echo "$WORKER_IP_BASE" | awk -F. '{print $1"."$2"."$3"."$4+1}')
+
+echo "  ✓ Node IPs: $MASTER_VM_IP (master), $WORKER1_IP (worker-1), $WORKER2_IP (worker-2)"
 
 echo ""
 
 # Summary
 echo "  === Kubernetes Dashboard Installed ==="
 echo ""
-echo "  Access Instructions:"
-echo "  1. Start port-forward:"
-echo "     kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443"
+echo "  Web Access:"
+echo "    https://$MASTER_VM_IP:30443"
+echo "    (Accept the self-signed certificate warning)"
 echo ""
-echo "  2. Open browser:"
-echo "     https://localhost:8443"
-echo "     (Accept the self-signed certificate warning)"
+echo "  Alternative Access (any node):"
+echo "    https://$WORKER1_IP:30443 (worker-1)"
+echo "    https://$WORKER2_IP:30443 (worker-2)"
 echo ""
-echo "  3. Login with token:"
-echo "     Token file: $CONFIG_DIR/dashboard-admin-token.txt"
-echo "     Or run: kubectl -n kubernetes-dashboard create token admin-user"
+echo "  Login Token:"
+echo "    Token file: $CONFIG_DIR/dashboard-admin-token.txt"
+echo "    Or run: kubectl -n kubernetes-dashboard create token admin-user"
 echo ""
 echo "  ✓ Kubernetes Dashboard installation complete"
 echo ""

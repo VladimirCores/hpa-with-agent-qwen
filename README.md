@@ -79,6 +79,22 @@ KUBECONFIG=talos-cluster/kubeconfig kubectl get pods -A
 KUBECONFIG=talos-cluster/kubeconfig cilium status
 ```
 
+### Step 6: Access Kubernetes Dashboard
+
+The dashboard is automatically installed during bootstrap and exposed via NodePort.
+
+```bash
+# Open in browser (accept certificate warning)
+https://192.168.123.10:30443
+
+# Or access via any worker node
+https://192.168.123.20:30443
+https://192.168.123.21:30443
+
+# Login with admin token
+cat talos-cluster/dashboard-admin-token.txt
+```
+
 ## Current Cluster Status
 
 | Component | Status | Version |
@@ -253,7 +269,7 @@ Each step logs detailed progress with timestamps. See `/tmp/vms-startup.log` for
 
 ## Bootstrap Script Steps
 
-The `bootstrap.sh` script runs 9 steps:
+The `bootstrap.sh` script runs 10 steps:
 
 | Step | Description | Duration |
 |------|-------------|----------|
@@ -263,9 +279,21 @@ The `bootstrap.sh` script runs 9 steps:
 | 4 | Wait for nodes | ~2min |
 | 5 | Bootstrap cluster | ~30s |
 | 6 | Apply configs | ~30s |
-| 7 | Verify bootstrap | ~10s |
+| 7 | Verify bootstrap (health checks) | ~2min |
 | 8 | Configure kubectl | ~10s |
-| 9 | Cluster verification | ~15s |
+| 9 | Install Kubernetes Dashboard | ~1min |
+| 10 | Cluster verification | ~15s |
+
+### Dashboard Access
+
+After bootstrap completes, the Kubernetes Dashboard is accessible at:
+
+```
+URL: https://192.168.123.10:30443
+Token: talos-cluster/dashboard-admin-token.txt
+```
+
+The dashboard provides web-based cluster monitoring, pod management, and resource visualization.
 
 ## Documentation
 
@@ -278,6 +306,7 @@ The `bootstrap.sh` script runs 9 steps:
 | `docs/05-Cilium-Setup.md` | Cilium CNI guide |
 | `docs/06-HPA-Study-Guide.md` | HPA examples and exercises |
 | `docs/07-User-Session-Mode.md` | User session mode |
+| `docs/08-Kubernetes-Dashboard.md` | Dashboard setup and access |
 
 ## Troubleshooting
 
@@ -338,6 +367,25 @@ Set `SUDO_PASSWORD` in `.env` to avoid interactive sudo prompts:
 
 ```bash
 echo "SUDO_PASSWORD=your_password" >> .env
+```
+
+### Dashboard Access Issues
+
+```bash
+# Check dashboard pods
+kubectl get pods -n kubernetes-dashboard
+
+# Check dashboard service
+kubectl get svc -n kubernetes-dashboard
+
+# Verify NodePort
+kubectl get svc kubernetes-dashboard -n kubernetes-dashboard -o jsonpath='{.spec.ports[0].nodePort}'
+
+# Regenerate admin token
+kubectl -n kubernetes-dashboard create token admin-user > talos-cluster/dashboard-admin-token.txt
+
+# Test connectivity
+curl -k https://192.168.123.10:30443
 ```
 
 ## Sudo Password Caching
