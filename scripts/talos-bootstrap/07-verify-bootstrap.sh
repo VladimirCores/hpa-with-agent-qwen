@@ -184,10 +184,73 @@ fi
 
 echo ""
 
-# Phase 5: Verify etcd health
-echo "  Phase 5: Verifying etcd health..."
+# Phase 5: Verify kubelet is healthy on ALL nodes
+echo "  Phase 5: Verifying kubelet health on all nodes..."
+KUBELET_WAIT=0
+KUBELET_TIMEOUT=300
+KUBELET_CHECK_INTERVAL=5
+
+# Build list of all node IPs
+ALL_NODE_IPS=("$MASTER_IP")
+for i in $(seq 1 $WORKER_COUNT); do
+    WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
+    ALL_NODE_IPS+=("$WORKER_IP")
+done
+
+while [[ $KUBELET_WAIT -lt $KUBELET_TIMEOUT ]]; do
+    ALL_KUBELETS_RUNNING=true
+    KUBELET_STATUS_OUTPUT=""
+    
+    for node_ip in "${ALL_NODE_IPS[@]}"; do
+        # Get kubelet service status
+        KUBELET_STATUS=$(talosctl service kubelet --nodes "$node_ip" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+        
+        # Check if kubelet is running (STATE line shows "Running")
+        if echo "$KUBELET_STATUS" | grep -q "^STATE.*Running"; then
+            NODE_HEALTHY=true
+        else
+            NODE_HEALTHY=false
+            ALL_KUBELETS_RUNNING=false
+        fi
+        
+        # Parse status fields
+        NODE_STATE=$(echo "$KUBELET_STATUS" | grep "^STATE" | awk '{print $2}' || echo "unknown")
+        NODE_HEALTH=$(echo "$KUBELET_STATUS" | grep "^HEALTH" | awk '{print $2}' || echo "unknown")
+        
+        KUBELET_STATUS_OUTPUT+="    $node_ip: State=$NODE_STATE, Health=$NODE_HEALTH"$'\n'
+    done
+    
+    if [[ "$ALL_KUBELETS_RUNNING" == "true" ]]; then
+        echo "  ✓ Kubelet is Running and Healthy on all ${#ALL_NODE_IPS[@]} nodes (${KUBELET_WAIT}s)"
+        echo ""
+        echo "  Kubelet status:"
+        echo "$KUBELET_STATUS_OUTPUT"
+        break
+    fi
+    
+    # Show progress
+    if [[ $((KUBELET_WAIT % 15)) -eq 0 ]] || [[ $KUBELET_WAIT -lt 30 ]]; then
+        echo "    Kubelets: waiting for all nodes... (${KUBELET_WAIT}s)"
+        echo "$KUBELET_STATUS_OUTPUT" | head -5
+    fi
+    
+    sleep $KUBELET_CHECK_INTERVAL
+    KUBELET_WAIT=$((KUBELET_WAIT + KUBELET_CHECK_INTERVAL))
+done
+
+if [[ $KUBELET_WAIT -ge $KUBELET_TIMEOUT ]]; then
+    echo "  WARNING: Not all kubelets are Running after ${KUBELET_TIMEOUT}s"
+    echo "  Current kubelet status:"
+    echo "$KUBELET_STATUS_OUTPUT"
+fi
+
+echo ""
+
+# Phase 6: Verify etcd health
+echo "  Phase 6: Verifying etcd health..."
 ETCD_OUTPUT=$(talosctl get etcdmembers --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-ETCD_MEMBER_COUNT=$(echo "$ETCD_OUTPUT" | grep -c "EtcdMember" || echo "0")
+ETCD_MEMBER_COUNT=$(echo "$ETCD_OUTPUT" | grep -c "EtcdMember" 2>/dev/null || echo "0")
+ETCD_MEMBER_COUNT=$(echo "$ETCD_MEMBER_COUNT" | tr -d '[:space:]')
 
 if [[ $ETCD_MEMBER_COUNT -ge 1 ]]; then
     echo "  ✓ etcd is healthy ($ETCD_MEMBER_COUNT member(s))"
@@ -202,11 +265,17 @@ echo ""
 # Summary
 echo "  === Cluster Status ==="
 echo "  Nodes: $READY_COUNT/$EXPECTED_NODES Ready"
+echo "  Kubelets: ${#ALL_NODE_IPS[@]}/${#ALL_NODE_IPS[@]} Running"
 echo "  System Pods: $RUNNING/$TOTAL Running"
 echo "  etcd: $ETCD_MEMBER_COUNT member(s)"
 echo ""
 
-if [[ $READY_COUNT -ge $EXPECTED_NODES ]] && [[ $RUNNING -ge $TOTAL ]]; then
+KUBELET_HEALTHY=true
+if [[ $KUBELET_WAIT -ge $KUBELET_TIMEOUT ]]; then
+    KUBELET_HEALTHY=false
+fi
+
+if [[ $READY_COUNT -ge $EXPECTED_NODES ]] && [[ $RUNNING -ge $TOTAL ]] && [[ "$KUBELET_HEALTHY" == "true" ]]; then
     echo "  ✓ Cluster is FULLY HEALTHY"
 else
     echo "  ⚠ Cluster is partially healthy"
