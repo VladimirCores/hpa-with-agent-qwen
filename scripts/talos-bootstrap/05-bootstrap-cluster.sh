@@ -32,24 +32,20 @@ VERSION_OUTPUT=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" 
 if echo "$VERSION_OUTPUT" | grep -q "API is not implemented in maintenance mode"; then
     echo "  ✓ Node is in maintenance mode (Talos v1.12.x)"
     echo "  Applying config before bootstrap..."
-    if talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1; then
-        echo "  ✓ Config applied successfully"
-    else
-        echo "  WARNING: Config apply returned non-zero, continuing anyway..."
-    fi
+    talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1 || true
     echo "  Waiting for node to reboot after config apply..."
-    sleep 45
+    sleep 60
     # Fix endpoints in talosconfig
     sed -i 's/endpoints: \[\]/endpoints: ['$MASTER_IP']/g' "$CONFIG_DIR/talosconfig"
     # Wait for node to come back up with new PKI
     echo "  Waiting for node to come back online..."
-    for i in $(seq 1 30); do
+    for i in $(seq 1 40); do
         local_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
         if echo "$local_output" | grep -q "Server:"; then
             echo "  ✓ Node is back online (${i}s)"
             break
         fi
-        if [[ $((i % 5)) -eq 0 ]]; then
+        if [[ $((i % 10)) -eq 0 ]]; then
             echo "  ... waiting for node (${i}s)"
         fi
         sleep 3
@@ -90,7 +86,7 @@ echo "  Bootstrapping cluster on $MASTER_NAME ($MASTER_IP)..."
 
 # Try bootstrap with retries (node may need time to fully initialize after reboot)
 BOOTSTRAP_SUCCESS=false
-for attempt in 1 2 3; do
+for attempt in 1 2 3 4 5; do
     echo "  Bootstrap attempt $attempt..."
     if talosctl bootstrap --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1; then
         echo "  ✓ Kubernetes cluster bootstrapped"
@@ -98,9 +94,9 @@ for attempt in 1 2 3; do
         break
     else
         echo "  Attempt $attempt failed"
-        if [[ $attempt -lt 3 ]]; then
-            echo "  Waiting 15s before retry..."
-            sleep 15
+        if [[ $attempt -lt 5 ]]; then
+            echo "  Waiting 30s before retry..."
+            sleep 30
         fi
     fi
 done
