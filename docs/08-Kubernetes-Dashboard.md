@@ -4,9 +4,19 @@ The Kubernetes Dashboard is automatically installed during the bootstrap process
 
 ## Access
 
-### Web URL
+### Web URL (From Host Machine)
 
-The dashboard is exposed via **NodePort 30443** on all cluster nodes:
+The dashboard is accessible via automatic port-forward at:
+
+```
+URL: https://localhost:8443
+```
+
+> **Note:** Accept the self-signed certificate warning in your browser.
+
+### Internal Access (From VM Network)
+
+The dashboard is also exposed via NodePort on all cluster nodes:
 
 | Node | URL |
 |------|-----|
@@ -14,7 +24,7 @@ The dashboard is exposed via **NodePort 30443** on all cluster nodes:
 | Worker-1 | `https://192.168.123.20:30443` |
 | Worker-2 | `https://192.168.123.21:30443` |
 
-> **Note:** Accept the self-signed certificate warning in your browser.
+> **Note:** These URLs are only accessible from within the VM network, not from the host machine.
 
 ### Authentication
 
@@ -26,6 +36,19 @@ cat talos-cluster/dashboard-admin-token.txt
 
 # Or generate new token
 kubectl -n kubernetes-dashboard create token admin-user
+```
+
+## Automatic Port-Forward
+
+After bootstrap completes, port-forward is automatically started in the background.
+
+**If you need to restart it:**
+```bash
+# Kill existing port-forward
+pkill -f "kubectl.*port-forward.*kubernetes-dashboard"
+
+# Start new port-forward
+kubectl --kubeconfig talos-cluster/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443
 ```
 
 ## What Gets Installed
@@ -51,6 +74,20 @@ bash scripts/talos-bootstrap/09-install-dashboard.sh
 
 ## Troubleshooting
 
+### Cannot access https://localhost:8443
+
+```bash
+# Check if port-forward is running
+ps aux | grep port-forward
+
+# Check port-forward logs
+cat /tmp/dashboard-portforward.log
+
+# Restart port-forward
+pkill -f "kubectl.*port-forward.*kubernetes-dashboard"
+kubectl --kubeconfig talos-cluster/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443
+```
+
 ### Dashboard pods not running
 
 ```bash
@@ -59,19 +96,6 @@ kubectl get pods -n kubernetes-dashboard
 
 # Check pod logs
 kubectl logs -n kubernetes-dashboard -l k8s-app=kubernetes-dashboard
-```
-
-### Cannot access dashboard URL
-
-```bash
-# Verify service
-kubectl get svc -n kubernetes-dashboard
-
-# Verify NodePort is configured
-kubectl get svc kubernetes-dashboard -n kubernetes-dashboard -o jsonpath='{.spec.ports[0].nodePort}'
-
-# Check if port is accessible (from host)
-curl -k https://192.168.123.10:30443
 ```
 
 ### Token expired or invalid

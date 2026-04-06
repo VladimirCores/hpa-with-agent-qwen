@@ -151,6 +151,49 @@ KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl patch svc kubernetes-dashboard -n ku
 echo "  ✓ Dashboard exposed on NodePort 30443"
 echo ""
 
+# Start automatic port-forward for direct host access
+echo "  Phase 6: Starting automatic port-forward for host access..."
+echo "  This makes the dashboard accessible at https://localhost:8443"
+echo ""
+
+# Kill any existing port-forward
+pkill -f "kubectl.*port-forward.*kubernetes-dashboard.*8443" 2>/dev/null || true
+sleep 1
+
+# Start port-forward in background
+nohup kubectl \
+    --kubeconfig "$CONFIG_DIR/kubeconfig" \
+    -n kubernetes-dashboard \
+    port-forward svc/kubernetes-dashboard 8443:443 \
+    > /tmp/dashboard-portforward.log 2>&1 &
+PORT_FORWARD_PID=$!
+
+# Wait for port-forward to be ready
+PF_WAIT=0
+PF_TIMEOUT=30
+
+while [[ $PF_WAIT -lt $PF_TIMEOUT ]]; do
+    if curl -sk --connect-timeout 2 https://localhost:8443 -o /dev/null 2>/dev/null; then
+        echo "  ✓ Port-forward started (PID: $PORT_FORWARD_PID)"
+        echo "  ✓ Dashboard accessible at: https://localhost:8443"
+        break
+    fi
+    
+    if [[ $((PF_WAIT % 5)) -eq 0 ]]; then
+        echo "    Starting port-forward... (${PF_WAIT}s)"
+    fi
+    
+    sleep 1
+    PF_WAIT=$((PF_WAIT + 1))
+done
+
+if [[ $PF_WAIT -ge $PF_TIMEOUT ]]; then
+    echo "  WARNING: Port-forward may not be ready"
+    echo "  Manual start: kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443"
+fi
+
+echo ""
+
 # Get VM IPs for access instructions (from .env)
 echo "  Retrieving node IP addresses..."
 MASTER_VM_IP="${MASTER_IP:-192.168.123.10}"
@@ -164,17 +207,21 @@ echo ""
 # Summary
 echo "  === Kubernetes Dashboard Installed ==="
 echo ""
-echo "  Web Access:"
-echo "    https://$MASTER_VM_IP:30443"
+echo "  Web Access (from host machine):"
+echo "    https://localhost:8443"
 echo "    (Accept the self-signed certificate warning)"
-echo ""
-echo "  Alternative Access (any node):"
-echo "    https://$WORKER1_IP:30443 (worker-1)"
-echo "    https://$WORKER2_IP:30443 (worker-2)"
 echo ""
 echo "  Login Token:"
 echo "    Token file: $CONFIG_DIR/dashboard-admin-token.txt"
 echo "    Or run: kubectl -n kubernetes-dashboard create token admin-user"
+echo ""
+echo "  Internal Access (from VM network):"
+echo "    https://$MASTER_VM_IP:30443 (master)"
+echo "    https://$WORKER1_IP:30443 (worker-1)"
+echo "    https://$WORKER2_IP:30443 (worker-2)"
+echo ""
+echo "  To restart port-forward if needed:"
+echo "    kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443"
 echo ""
 echo "  ✓ Kubernetes Dashboard installation complete"
 echo ""

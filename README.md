@@ -81,19 +81,20 @@ KUBECONFIG=talos-cluster/kubeconfig cilium status
 
 ### Step 6: Access Kubernetes Dashboard
 
-The dashboard is automatically installed during bootstrap and exposed via NodePort.
+The dashboard is automatically installed during bootstrap and exposed via automatic port-forward.
 
 ```bash
-# Open in browser (accept certificate warning)
-https://192.168.123.10:30443
-
-# Or access via any worker node
-https://192.168.123.20:30443
-https://192.168.123.21:30443
+# Open in browser (port-forward started automatically)
+https://localhost:8443
 
 # Login with admin token
 cat talos-cluster/dashboard-admin-token.txt
 ```
+
+> **Note:** The port-forward runs in the background after bootstrap. If you need to restart it:
+> ```bash
+> kubectl --kubeconfig talos-cluster/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443
+> ```
 
 ## Current Cluster Status
 
@@ -289,11 +290,16 @@ The `bootstrap.sh` script runs 10 steps:
 After bootstrap completes, the Kubernetes Dashboard is accessible at:
 
 ```
-URL: https://192.168.123.10:30443
+URL: https://localhost:8443
 Token: talos-cluster/dashboard-admin-token.txt
 ```
 
 The dashboard provides web-based cluster monitoring, pod management, and resource visualization.
+
+> **Note:** Port-forward runs automatically after bootstrap. To restart manually:
+> ```bash
+> kubectl --kubeconfig talos-cluster/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443
+> ```
 
 ## Documentation
 
@@ -378,14 +384,14 @@ kubectl get pods -n kubernetes-dashboard
 # Check dashboard service
 kubectl get svc -n kubernetes-dashboard
 
-# Verify NodePort
-kubectl get svc kubernetes-dashboard -n kubernetes-dashboard -o jsonpath='{.spec.ports[0].nodePort}'
+# Restart port-forward
+kubectl --kubeconfig talos-cluster/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443
+
+# Test localhost access
+curl -k https://localhost:8443
 
 # Regenerate admin token
 kubectl -n kubernetes-dashboard create token admin-user > talos-cluster/dashboard-admin-token.txt
-
-# Test connectivity
-curl -k https://192.168.123.10:30443
 ```
 
 ## Sudo Password Caching
