@@ -1,6 +1,6 @@
 # Talos Kubernetes Cluster with HPA Study
 
-A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autoscaling (HPA) with Cilium CNI and kube-proxy replacement.
+A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autoscaling (HPA) with advanced networking and observability.
 
 ## Quick Start
 
@@ -14,49 +14,15 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 - **helm** for component installation
 - **User in libvirt group**: `sudo usermod -aG libvirt $USER` (then log out/in)
 
-### Running Mode
-
-This cluster runs **exclusively in user session mode** (`qemu:///session`):
-
-| Feature | Value |
-|---------|-------|
-| **Mode** | User Session |
-| **Sudo Required** | No (after initial polkit setup) |
-| **Networking** | NAT only |
-| **Storage** | Project-local (`.vagrant/storage-pool/`) |
-| **Portability** | Full (entire cluster in project folder) |
-
-### One-Time Setup: Polkit Configuration
-
-**Required for network creation in session mode** (run once with sudo):
-
-```bash
-# Create polkit rule to allow network operations
-sudo tee /etc/polkit-1/rules.d/50-libvirt-networks.rules > /dev/null << 'POLKIT'
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.libvirt.unix.network.create" ||
-        action.id == "org.libvirt.unix.network.modify" ||
-        action.id == "org.libvirt.unix.network.start" ||
-        action.id == "org.libvirt.unix.network.destroy") {
-        return polkit.Result.YES;
-    }
-});
-POLKIT
-
-# Reload polkit
-sudo systemctl restart polkit
-
-# Verify (should work without sudo)
-virsh -c qemu:///session net-list --all
-```
-
-See [docs/07-User-Session-Mode.md](docs/07-User-Session-Mode.md) for details.
-
 ### Step 1: Configure Environment
 
 ```bash
-# Copy example environment file (pre-configured for session mode)
+# Copy and customize environment file
 cp .env.example .env
+
+# Optional: Set sudo password for non-interactive startup
+# (prevents sudo prompts during startup.sh)
+# echo "SUDO_PASSWORD=your_password" >> .env
 ```
 
 ### Step 2: Start Cluster
@@ -68,10 +34,9 @@ cp .env.example .env
 # Options:
 #   -s  Skip cleanup (don't stop existing VMs)
 #   -f  Force reset (destroy VMs and disks)
-#   -v  Verbose output
 ```
 
-**Wait time:** ~5-7 minutes (VMs boot from ISO)
+**Wait time:** ~8-12 minutes (ISO boot + Talos install to disk)
 
 ### Step 3: Bootstrap Talos Cluster
 
@@ -80,7 +45,7 @@ cp .env.example .env
 ./bootstrap.sh
 ```
 
-**Wait time:** ~2-3 minutes
+**Wait time:** ~3-5 minutes
 
 ### Step 4: Install Cilium CNI
 
@@ -105,16 +70,13 @@ cp .env.example .env
 
 ```bash
 # Check nodes
-kubectl get nodes
+KUBECONFIG=talos-cluster/kubeconfig kubectl get nodes
 
 # Check system pods
-kubectl get pods -A
+KUBECONFIG=talos-cluster/kubeconfig kubectl get pods -A
 
 # Check Cilium status
-cilium status
-
-# Test metrics (if installed)
-kubectl top nodes
+KUBECONFIG=talos-cluster/kubeconfig cilium status
 ```
 
 ## Current Cluster Status
@@ -123,58 +85,108 @@ kubectl top nodes
 |-----------|--------|---------|
 | **Talos** | ✅ Ready | v1.12.6 |
 | **Kubernetes** | ✅ Ready | v1.35.2 |
-| **CNI** | ✅ Cilium | v1.19.1 |
-| **kube-proxy** | ✅ Replaced | BPF-based |
-| **metrics-server** | Optional | - |
+| **CNI** | 🔲 Cilium/Flannel/Calico | Configurable |
+| **metrics-server** | Optional | v0.7.1 |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Talos Kubernetes Cluster                  │
-│  Network: 10.0.0.0/24 (NAT)                                  │
+│  Network: 192.168.123.0/24 (NAT)                             │
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
 │  │   Master    │  │  Worker-1   │  │  Worker-2   │         │
-│  │ 10.0.0.10   │  │ 10.0.0.11   │  │ 10.0.0.12   │         │
-│  │ 4 CPU/4GB   │  │ 1 CPU/2GB   │  │ 1 CPU/2GB   │         │
+│  │ 192.168.123.10│ │ 192.168.123.20│ │ 192.168.123.21│     │
+│  │ 4 CPU/6GB   │  │ 2 CPU/2GB   │  │ 2 CPU/2GB   │         │
 │  │ etcd, API   │  │ kubelet     │  │ kubelet     │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
-│                                                              │
-│  CNI: Cilium (eBPF)                                          │
-│  kube-proxy: Replaced with BPF                               │
 └─────────────────────────────────────────────────────────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │  Host (talosctl)  │
+                    └───────────────────┘
 ```
+
+### VM Boot Flow
+
+```
+1. VM boots from disk (empty)
+2. Falls back to ISO (CDROM)
+3. Talos auto-installs to disk from ISO
+4. VM auto-reboots
+5. Boots from disk (installed Talos)
+6. Ready for bootstrap
+```
+
+### Persistent Disk
+
+VMs use **disk-first boot order** (`hd → cdrom`):
+- After initial ISO install, VMs boot from installed Talos on disk
+- Disks persist across reboots
+- No need to re-install on subsequent startups
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NETWORK_NAME` | cluster-net | libvirt network name |
+| `MASTER_IP` | 192.168.123.10 | Master node IP |
+| `MASTER_CPUS` | 4 | Master CPU count |
+| `MASTER_MEMORY` | 6144 | Master memory (MB) |
+| `WORKER_COUNT` | 2 | Number of workers |
+| `WORKER_IP_BASE` | 192.168.123.20 | First worker IP |
+| `WORKER_CPUS` | 2 | Worker CPU count |
+| `WORKER_MEMORY` | 2048 | Worker memory (MB) |
+| `FORWARD_MODE` | nat | Network mode (nat or bridge) |
+| `LIBVIRT_URI` | qemu:///system | Libvirt connection URI |
+| `SUDO_PASSWORD` | (empty) | Sudo password for non-interactive startup |
+
+### Network Configuration
+
+| Setting | Value |
+|---------|-------|
+| Network CIDR | 192.168.123.0/24 |
+| Gateway | 192.168.123.1 |
+| DHCP Range | 192.168.123.2 - 192.168.123.254 |
+| Forward Mode | NAT |
+
+### Static IP Reservations
+
+| Node | IP | MAC |
+|------|-----|-----|
+| talos-master | 192.168.123.10 | `${MAC_PREFIX}:01` |
+| talos-worker-1 | 192.168.123.20 | `${MAC_PREFIX}:0b` |
+| talos-worker-2 | 192.168.123.21 | `${MAC_PREFIX}:0c` |
 
 ## CNI Options
 
-### Cilium (Default)
+### Cilium (Recommended)
 
 ```bash
 # Install Cilium with kube-proxy replacement
-./scripts/k8s-components.sh
-
-# Check status
-cilium status
+./scripts/k8s-components.sh --cni-cilium
 ```
 
 **Features:**
 - eBPF-based networking
 - kube-proxy replacement
 - Network policies
-- Hubble observability (optional)
+- Hubble observability
 
-### Flannel (Alternative)
+### Flannel
 
 ```bash
-# Install Flannel instead
+# Install Flannel
 ./scripts/k8s-components.sh --cni-flannel
 ```
 
-### Calico (Alternative)
+### Calico
 
 ```bash
-# Install Calico instead
+# Install Calico
 ./scripts/k8s-components.sh --cni-calico
 ```
 
@@ -200,25 +212,60 @@ kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
 kubectl get hpa --watch
 ```
 
-### Without metrics-server
-
-Use custom metrics or external metrics providers. See `docs/06-HPA-Study-Guide.md`
-
 ## Management Commands
 
 ```bash
 # Start cluster
-./scripts/vms-startup.sh
+./startup.sh
+
+# Bootstrap Talos
+./bootstrap.sh
 
 # Stop cluster (preserves data)
-./scripts/vms-cleanup.sh
+./cleanup.sh
 
 # Full reset
-./scripts/vms-cleanup.sh -n
+./cleanup.sh -f
 
-# Re-bootstrap
-./scripts/talos-bootstrap.sh
+# Check VM status
+virsh -c qemu:///system list | grep talos
+
+# Check DHCP leases
+virsh -c qemu:///system net-dhcp-leases cluster-net
 ```
+
+## Startup Script Steps
+
+The `startup.sh` script runs 8 steps with verification:
+
+| Step | Description | Duration |
+|------|-------------|----------|
+| 1 | Check prerequisites | ~5s |
+| 2 | Prepare Talos image | ~5s |
+| 3 | Create storage pool | ~5s |
+| 4 | Setup network | ~10s |
+| 5 | Cleanup existing VMs | ~15s |
+| 6 | Start VMs | ~60s |
+| 7 | Skip UEFI (BIOS boot) | ~2s |
+| 8 | Wait for Talos boot | ~5-8 min |
+
+Each step logs detailed progress with timestamps. See `/tmp/vms-startup.log` for full logs.
+
+## Bootstrap Script Steps
+
+The `bootstrap.sh` script runs 9 steps:
+
+| Step | Description | Duration |
+|------|-------------|----------|
+| 1 | Check prerequisites | ~5s |
+| 2 | Generate secrets | ~2s |
+| 3 | Generate configs | ~5s |
+| 4 | Wait for nodes | ~2min |
+| 5 | Bootstrap cluster | ~30s |
+| 6 | Apply configs | ~30s |
+| 7 | Verify bootstrap | ~10s |
+| 8 | Configure kubectl | ~10s |
+| 9 | Cluster verification | ~15s |
 
 ## Documentation
 
@@ -230,46 +277,83 @@ Use custom metrics or external metrics providers. See `docs/06-HPA-Study-Guide.m
 | `docs/04-Istio-Envoy-Gateway-Preview.md` | Istio installation |
 | `docs/05-Cilium-Setup.md` | Cilium CNI guide |
 | `docs/06-HPA-Study-Guide.md` | HPA examples and exercises |
-| `docs/07-User-Session-Mode.md` | User session mode (no sudo) |
+| `docs/07-User-Session-Mode.md` | User session mode |
 
 ## Troubleshooting
 
-### Cilium Pods Not Ready
+### VMs Won't Start
 
 ```bash
-# Check Cilium status
-cilium status
+# Check libvirtd
+systemctl status libvirtd
 
-# Check logs
-kubectl logs -n kube-system -l k8s-app=cilium
+# Check storage pool
+virsh -c qemu:///system pool-info talos-pool
 
-# Reinstall
-cilium uninstall --wait
-./scripts/k8s-components.sh
+# Check network
+virsh -c qemu:///system net-info cluster-net
 ```
 
 ### Bootstrap Fails
 
 ```bash
-# Reset nodes
-talosctl reset --nodes 10.0.0.10,10.0.0.11,10.0.0.12 --graceful=false
+# Check if nodes are in maintenance mode
+talosctl version --nodes 192.168.123.10 --endpoints 192.168.123.10 --insecure
 
-# Re-bootstrap
-./scripts/talos-bootstrap.sh
+# Reset nodes (wipes disks)
+talosctl reset --nodes 192.168.123.10 --endpoints 192.168.123.10 --insecure --graceful=false --wait=false
+
+# Full cleanup and restart
+./cleanup.sh -f
+./startup.sh
+./bootstrap.sh
+```
+
+### Talos Not Accessible After Boot
+
+```bash
+# Check VM IPs
+virsh -c qemu:///system net-dhcp-leases cluster-net
+
+# Check Talos status
+talosctl version --nodes 192.168.123.10 --endpoints 192.168.123.10 --insecure
+
+# Check cluster members
+talosctl get members --nodes 192.168.123.10 --endpoints 192.168.123.10
 ```
 
 ### Network Issues
 
 ```bash
-# Check network
-virsh -c qemu:///system net-info cluster-talos-net
-
-# Check DHCP leases
-virsh -c qemu:///system net-dhcp-leases cluster-talos-net
-
 # Recreate network
 ./scripts/prepare-network.sh
+
+# Check DHCP
+virsh -c qemu:///system net-dhcp-leases cluster-net
 ```
+
+### Sudo Prompts During Startup
+
+Set `SUDO_PASSWORD` in `.env` to avoid interactive sudo prompts:
+
+```bash
+echo "SUDO_PASSWORD=your_password" >> .env
+```
+
+## Sudo Password Caching
+
+When `SUDO_PASSWORD` is set in `.env`, all scripts use it for sudo commands automatically:
+
+```bash
+# Without SUDO_PASSWORD: prompts for password
+./startup.sh
+
+# With SUDO_PASSWORD: non-interactive
+# (set in .env: SUDO_PASSWORD=your_password)
+./startup.sh
+```
+
+**Security note:** Never commit `.env` with real password to version control.
 
 ## Resources
 

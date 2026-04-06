@@ -19,9 +19,9 @@ The Vagrant configuration creates a Talos cluster with one master node and confi
 
 | Node           | CPUs | Memory | Disk | IP Address | MAC Address        |
 | -------------- | ---- | ------ | ---- | ---------- | ------------------ |
-| talos-master   | 4    | 4096MB | -    | 10.0.0.10  | `${MAC_PREFIX}:01` |
-| talos-worker-1 | 1    | 2048MB | -    | 10.0.0.11  | `${MAC_PREFIX}:0b` |
-| talos-worker-2 | 1    | 2048MB | -    | 10.0.0.12  | `${MAC_PREFIX}:0c` |
+| talos-master   | 4    | 6144MB | -    | 192.168.123.10  | `${MAC_PREFIX}:01` |
+| talos-worker-1 | 2    | 2048MB | -    | 192.168.123.20  | `${MAC_PREFIX}:0b` |
+| talos-worker-2 | 2    | 2048MB | -    | 192.168.123.21  | `${MAC_PREFIX}:0c` |
 
 > **Note:** MAC addresses use the `MAC_PREFIX` from `.env` (default: `52:54:00:00:00`).
 
@@ -51,13 +51,13 @@ Edit `.env` to customize your cluster:
 
 ```bash
 # Network Configuration
-NETWORK_NAME=cluster-talos-net
-BRIDGE_NAME=talos-bridge
-NETWORK_CIDR=10.0.0.1/24
-NETWORK_IP=10.0.0.1
+NETWORK_NAME=cluster-net
+BRIDGE_NAME=cluster-bridge
+NETWORK_CIDR=192.168.123.1/24
+NETWORK_IP=192.168.123.1
 NETWORK_MASK=255.255.255.0
-DHCP_START=10.0.0.2
-DHCP_END=10.0.0.254
+DHCP_START=192.168.123.2
+DHCP_END=192.168.123.254
 FORWARD_MODE=nat
 
 # Storage Configuration
@@ -65,14 +65,14 @@ STORAGE_POOL=talos-pool
 
 # Master Node Configuration
 MASTER_NAME=talos-master
-MASTER_IP=10.0.0.10
+MASTER_IP=192.168.123.10
 MASTER_CPUS=4
 MASTER_MEMORY=4096
 
 # Worker Nodes Configuration
 WORKER_COUNT=2
 WORKER_NAME_PREFIX=talos-worker-
-WORKER_IP_BASE=10.0.0.11
+WORKER_IP_BASE=192.168.123.20
 WORKER_CPUS=1
 WORKER_MEMORY=2048
 
@@ -222,7 +222,7 @@ Step 10: Async + Wait → completes
 
 ```bash
 # Get all IPv4 addresses from network
-mapfile -t IPS < <(libvirt_get_dhcp_ips -n cluster-talos-net -p ipv4)
+mapfile -t IPS < <(libvirt_get_dhcp_ips -n cluster-net -p ipv4)
 
 # Get all IPs (IPv4 + IPv6)
 mapfile -t IPS < <(libvirt_get_dhcp_ips -n my-network -p all)
@@ -237,10 +237,10 @@ Steps can be run independently for testing or debugging:
 
 ```bash
 # Run a specific step (helper functions auto-loaded)
-NETWORK_NAME=cluster-talos-net bash scripts/vms-startup/08-wait-for-talos.sh
+NETWORK_NAME=cluster-net bash scripts/vms-startup/08-wait-for-talos.sh
 
 # Run step 10 (reboot verification)
-NETWORK_NAME=cluster-talos-net bash scripts/vms-startup/10-reboot-verify.sh
+NETWORK_NAME=cluster-net bash scripts/vms-startup/10-reboot-verify.sh
 ```
 
 ### vms-cleanup.sh
@@ -279,10 +279,10 @@ virsh -c qemu:///system dominfo talos-master
 virsh -c qemu:///system net-list --all
 
 # Show network details
-virsh -c qemu:///system net-info cluster-talos-net
+virsh -c qemu:///system net-info cluster-net
 
 # Show DHCP leases
-virsh -c qemu:///system net-dhcp-leases cluster-talos-net
+virsh -c qemu:///system net-dhcp-leases cluster-net
 ```
 
 ### Check Storage
@@ -347,7 +347,7 @@ sudo usermod -aG libvirt $USER
 Verify MAC addresses match static reservations:
 
 ```bash
-virsh -c qemu:///system net-dumpxml cluster-talos-net | grep -A 20 '<dhcp>'
+virsh -c qemu:///system net-dumpxml cluster-net | grep -A 20 '<dhcp>'
 ```
 
 Check VM MAC addresses:
@@ -371,6 +371,6 @@ After VMs are running:
 1. Wait for Talos to boot (~30 seconds)
 2. Generate machine configurations:
    ```bash
-   talosctl gen config talos-default https://10.0.0.10:6443
+   talosctl gen config talos-default https://192.168.123.10:6443
    ```
 3. Apply configurations with talosctl (see `03-Talos-Configuration.md`)

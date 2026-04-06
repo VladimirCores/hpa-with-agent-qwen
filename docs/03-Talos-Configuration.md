@@ -54,7 +54,7 @@ After VMs are running, this step covers:
 > **Verify maintenance mode**:
 >
 > ```bash
-> talosctl get machineconfig --nodes 10.0.0.10 --insecure
+> talosctl get machineconfig --nodes 192.168.123.10 --insecure
 > # Empty output or success = maintenance mode ✓
 > # PermissionDenied = cluster mode (run cleanup or reset)
 > ```
@@ -66,7 +66,7 @@ After VMs are running, this step covers:
 │                    Talos Cluster                            │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
 │  │   Master    │  │  Worker-1   │  │  Worker-2   │         │
-│  │ 10.0.0.10   │  │ 10.0.0.11   │  │ 10.0.0.12   │         │
+│  │ 192.168.123.10   │  │ 192.168.123.20   │  │ 192.168.123.21   │         │
 │  │  etcd       │  │  kubelet    │  │  kubelet    │         │
 │  │  apiServer  │  │  kube-proxy │  │  kube-proxy │         │
 │  │  scheduler  │  │             │  │             │         │
@@ -136,9 +136,9 @@ The following variables from `.env` are used:
 | Variable         | Default       | Description            |
 | ---------------- | ------------- | ---------------------- |
 | `CLUSTER_NAME`   | talos-cluster | Cluster identifier     |
-| `MASTER_IP`      | 10.0.0.10     | Master node IP         |
+| `MASTER_IP`      | 192.168.123.10     | Master node IP         |
 | `WORKER_COUNT`   | 2             | Number of worker nodes |
-| `WORKER_IP_BASE` | 10.0.0.11     | First worker IP        |
+| `WORKER_IP_BASE` | 192.168.123.20     | First worker IP        |
 
 ### Machine Configuration Types
 
@@ -176,7 +176,7 @@ Bootstrap the entire cluster and install Kubernetes components:
 
 ```bash
 CLUSTER_NAME="talos-cluster"
-MASTER_IP="10.0.0.10"
+MASTER_IP="192.168.123.10"
 
 # Create config directory
 mkdir -p talos-cluster
@@ -197,10 +197,10 @@ This generates:
 
 ```bash
 # Wait for master to be ready
-talosctl wait --nodes 10.0.0.10
+talosctl wait --nodes 192.168.123.10
 
 # Apply control plane configuration
-talosctl apply-config --nodes 10.0.0.10 \
+talosctl apply-config --nodes 192.168.123.10 \
   --file talos-cluster/controlplane.yaml
 ```
 
@@ -222,16 +222,16 @@ context: talos-cluster
 contexts:
     talos-cluster:
         endpoints:
-            - 10.0.0.10
+            - 192.168.123.10
         nodes:
-            - 10.0.0.10
+            - 192.168.123.10
         ca: $CA_CRT
         crt: $ADMIN_CRT
         key: $ADMIN_KEY
 EOF
 
 # Now bootstrap
-talosctl bootstrap --nodes 10.0.0.10 \
+talosctl bootstrap --nodes 192.168.123.10 \
   --talosconfig talos-cluster/talosconfig
 ```
 
@@ -239,14 +239,14 @@ talosctl bootstrap --nodes 10.0.0.10 \
 
 ```bash
 # Wait for workers to be ready
-talosctl wait --nodes 10.0.0.11
-talosctl wait --nodes 10.0.0.12
+talosctl wait --nodes 192.168.123.20
+talosctl wait --nodes 192.168.123.21
 
 # Apply worker configuration
-talosctl apply-config --nodes 10.0.0.11 \
+talosctl apply-config --nodes 192.168.123.20 \
   --file talos-cluster/worker.yaml
 
-talosctl apply-config --nodes 10.0.0.12 \
+talosctl apply-config --nodes 192.168.123.21 \
   --file talos-cluster/worker.yaml
 ```
 
@@ -254,17 +254,17 @@ talosctl apply-config --nodes 10.0.0.12 \
 
 ```bash
 # Bootstrap the first control plane node
-talosctl bootstrap --nodes 10.0.0.10
+talosctl bootstrap --nodes 192.168.123.10
 ```
 
 #### Step 5: Configure kubectl Access
 
 ```bash
 # Get kubeconfig
-talosctl kubeconfig . --nodes 10.0.0.10
+talosctl kubeconfig . --nodes 192.168.123.10
 
 # Or merge with existing kubeconfig
-talosctl kubeconfig --merge --nodes 10.0.0.10
+talosctl kubeconfig --merge --nodes 192.168.123.10
 ```
 
 #### Step 6: Verify Cluster
@@ -416,13 +416,13 @@ echo 'TALOS_IMAGE_URL=https://github.com/siderolabs/talos/releases/download/v1.1
 Check Talos services:
 
 ```bash
-talosctl services --nodes 10.0.0.10
+talosctl services --nodes 192.168.123.10
 ```
 
 Check logs:
 
 ```bash
-talosctl logs --nodes 10.0.0.10 --service apid
+talosctl logs --nodes 192.168.123.10 --service apid
 ```
 
 ### Bootstrap fails
@@ -430,9 +430,9 @@ talosctl logs --nodes 10.0.0.10 --service apid
 Reset and retry:
 
 ```bash
-talosctl reset --nodes 10.0.0.10 --graceful=false
-talosctl reset --nodes 10.0.0.11 --graceful=false
-talosctl reset --nodes 10.0.0.12 --graceful=false
+talosctl reset --nodes 192.168.123.10 --graceful=false
+talosctl reset --nodes 192.168.123.20 --graceful=false
+talosctl reset --nodes 192.168.123.21 --graceful=false
 
 # Reapply configurations
 ./scripts/talos-bootstrap.sh
@@ -443,7 +443,7 @@ talosctl reset --nodes 10.0.0.12 --graceful=false
 Regenerate kubeconfig:
 
 ```bash
-talosctl kubeconfig . --nodes 10.0.0.10 --force
+talosctl kubeconfig . --nodes 192.168.123.10 --force
 ```
 
 ### CNI not working
