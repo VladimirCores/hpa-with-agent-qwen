@@ -116,11 +116,11 @@ wait_for_dhcp_leases() {
     return 1
 }
 
-# Check if Talos machine is READY
+# Check if Talos machine is accessible
 check_machine_ready() {
     local ip="$1"
     local output
-    output=$(talosctl version --nodes "$ip" --insecure 2>&1 || true)
+    output=$(talosctl version --nodes "$ip" --endpoints "$ip" --insecure 2>&1 || true)
     
     if echo "$output" | grep -q "Server:"; then
         # Has server info - check if it's maintenance or cluster mode
@@ -129,40 +129,39 @@ check_machine_ready() {
         else
             echo "true"
         fi
+    elif echo "$output" | grep -q "v1\."; then
+        # Version response without Server: section = maintenance mode
+        echo "maintenance"
     else
         echo "false"
     fi
 }
 
-# Check all machines ready
+# Check all machines accessible
 check_all_machines_ready() {
     local ips=("$@")
-    local all_ready=true
+    local all_accessible=true
 
     for ip in "${ips[@]}"; do
         if [[ -n "$ip" ]]; then
             local machine_status
             machine_status=$(check_machine_ready "$ip")
 
-            if [[ "$machine_status" == "true" ]]; then
+            if [[ "$machine_status" == "true" ]] || [[ "$machine_status" == "maintenance" ]]; then
+                # Both cluster mode and maintenance mode are acceptable
                 if [[ "$VERBOSE" == "true" ]]; then
-                    log "    ✓ $ip - Machine READY"
+                    log "    ✓ $ip - Talos accessible ($machine_status)"
                 fi
-            elif [[ "$machine_status" == "maintenance" ]]; then
-                if [[ "$VERBOSE" == "true" ]]; then
-                    log "    ⏳ $ip - Maintenance mode (installing)"
-                fi
-                all_ready=false
             else
                 if [[ "$VERBOSE" == "true" ]]; then
-                    log "    ⏳ $ip - Not ready"
+                    log "    ⏳ $ip - Not accessible"
                 fi
-                all_ready=false
+                all_accessible=false
             fi
         fi
     done
 
-    if [[ "$all_ready" == "true" ]]; then
+    if [[ "$all_accessible" == "true" ]]; then
         return 0
     else
         return 1
@@ -282,8 +281,8 @@ log "--- Phase 6: Talos Reboot from Disk ---"
 log "  Waiting for Talos to reboot from disk..."
 sleep 15
 
-# Phase 7: Poll Talos machines from disk boot
-log "--- Phase 7: Talos Disk Boot Verification ---"
+# Phase 7: Poll Talos machines accessibility
+log "--- Phase 7: Talos Accessibility ---"
 while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
     if [[ "$VERBOSE" == "true" ]]; then
         log "  [${BOOT_ELAPSED}s] Checking VM status..."
@@ -299,47 +298,48 @@ while [[ $BOOT_ELAPSED -lt $BOOT_WAIT ]]; do
 
     if [[ $total_count -gt 0 ]] && check_all_machines_ready "${VM_IPS[@]}"; then
         log ""
-        log "  Progress: ${total_count}/${total_count} VMs ready"
+        log "  Progress: ${total_count}/${total_count} VMs accessible"
         log ""
-        log "  ✓ All VMs ready!"
+        log "  ✓ All VMs accessible!"
         break
     fi
 
-    # Count ready machines for progress display
-    ready_count=0
+    # Count accessible machines for progress display
+    accessible_count=0
     for ip in "${VM_IPS[@]}"; do
         if [[ -n "$ip" ]]; then
             machine_status=$(check_machine_ready "$ip")
-            if [[ "$machine_status" == "true" ]]; then
-                ready_count=$((ready_count + 1))
+            if [[ "$machine_status" == "true" ]] || [[ "$machine_status" == "maintenance" ]]; then
+                accessible_count=$((accessible_count + 1))
             fi
         fi
     done
 
-    log "  Progress: ${ready_count}/${total_count} VMs ready (${BOOT_ELAPSED}s)"
+    log "  Progress: ${accessible_count}/${total_count} VMs accessible (${BOOT_ELAPSED}s)"
 
     sleep $BOOT_INTERVAL
     BOOT_ELAPSED=$((BOOT_ELAPSED + BOOT_INTERVAL))
 done
 
 if [[ $BOOT_ELAPSED -ge $BOOT_WAIT ]]; then
-    log "  WARNING: Not all VMs ready after ${BOOT_WAIT}s"
+    log "  WARNING: Not all VMs accessible after ${BOOT_WAIT}s"
     log "  Check VM console logs: virsh -c qemu:///system console <vm-name>"
     log "  Continuing anyway (VMs may need more time)..."
 fi
 
 log ""
-log "  ✓ Talos booted from disk"
+log "  ✓ All VMs running with Talos accessible"
 log ""
 
-# Final verification
+# Final status
 MASTER_IP="${VM_IPS[0]:-}"
 if [[ -n "$MASTER_IP" ]]; then
-    if talosctl version --nodes "$MASTER_IP" 2>&1 | grep -q "Server:"; then
+    master_status=$(check_machine_ready "$MASTER_IP")
+    if [[ "$master_status" == "maintenance" ]]; then
+        log "  Master node ($MASTER_IP) is in maintenance mode - ready for bootstrap"
+        log "  Run ./bootstrap.sh to configure and bootstrap the cluster"
+    elif [[ "$master_status" == "true" ]]; then
         log "  Master node ($MASTER_IP) is accessible and ready"
-        exit 0
     fi
 fi
-
-log "  Note: Bootstrap process will configure nodes with proper PKI"
 exit 0
