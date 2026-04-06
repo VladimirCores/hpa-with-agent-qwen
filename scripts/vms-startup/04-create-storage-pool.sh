@@ -72,11 +72,11 @@ EOF
 fi
 
 # Verify pool is active
-if virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" 2>/dev/null | grep -qi "running"; then
-    POOL_INFO=$(virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" 2>/dev/null)
-    CAPACITY=$(echo "$POOL_INFO" | grep "Capacity:" | awk '{print $2, $3}')
-    ALLOCATION=$(echo "$POOL_INFO" | grep "Allocation:" | awk '{print $2, $3}')
-    AVAILABLE=$(echo "$POOL_INFO" | grep "Available:" | awk '{print $2, $3}')
+POOL_STATE=$(virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" 2>/dev/null || true)
+if echo "$POOL_STATE" | grep -qi "running"; then
+    CAPACITY=$(echo "$POOL_STATE" | grep "Capacity:" | awk '{print $2, $3}')
+    ALLOCATION=$(echo "$POOL_STATE" | grep "Allocation:" | awk '{print $2, $3}')
+    AVAILABLE=$(echo "$POOL_STATE" | grep "Available:" | awk '{print $2, $3}')
     
     echo "  ✓ Storage pool is active"
     echo "    Capacity: $CAPACITY, Allocation: $ALLOCATION, Available: $AVAILABLE"
