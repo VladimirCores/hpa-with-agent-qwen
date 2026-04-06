@@ -131,6 +131,70 @@ if [[ "$BOOTSTRAP_SUCCESS" != "true" ]]; then
     fi
 fi
 
+# Verify all nodes are healthy after bootstrap
+echo ""
+echo "  Verifying node health..."
+echo "  Checking Talos cluster members..."
+
+EXPECTED_NODES=$((1 + WORKER_COUNT))
+NODE_CHECK_WAIT=0
+NODE_CHECK_INTERVAL=5
+NODE_CHECK_TIMEOUT=120
+
+while [[ $NODE_CHECK_WAIT -lt $NODE_CHECK_TIMEOUT ]]; do
+    MEMBERS_OUTPUT=$(talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+    MEMBER_COUNT=$(echo "$MEMBERS_OUTPUT" | grep -c "Member" || echo "0")
+    
+    if [[ $MEMBER_COUNT -ge $EXPECTED_NODES ]]; then
+        echo "  ✓ All $EXPECTED_NODES nodes present in cluster (${NODE_CHECK_WAIT}s)"
+        echo ""
+        echo "  Cluster members:"
+        echo "$MEMBERS_OUTPUT" | grep "Member" | while IFS= read -r line; do
+            echo "    $line"
+        done
+        break
+    fi
+    
+    if [[ $((NODE_CHECK_WAIT % 15)) -eq 0 ]] || [[ $NODE_CHECK_WAIT -lt 30 ]]; then
+        echo "    Found $MEMBER_COUNT/$EXPECTED_NODES nodes... (${NODE_CHECK_WAIT}s)"
+    fi
+    
+    sleep $NODE_CHECK_INTERVAL
+    NODE_CHECK_WAIT=$((NODE_CHECK_WAIT + NODE_CHECK_INTERVAL))
+done
+
+if [[ $NODE_CHECK_WAIT -ge $NODE_CHECK_TIMEOUT ]]; then
+    echo "  WARNING: Only $MEMBER_COUNT/$EXPECTED_NODES nodes found after ${NODE_CHECK_TIMEOUT}s"
+    echo "  Workers may still be joining the cluster"
+fi
+
+# Verify etcd health
+echo ""
+echo "  Checking etcd health..."
+ETCD_WAIT=0
+ETCD_TIMEOUT=60
+
+while [[ $ETCD_WAIT -lt $ETCD_TIMEOUT ]]; do
+    ETCD_OUTPUT=$(talosctl get etcdmembers --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+    ETCD_MEMBER_COUNT=$(echo "$ETCD_OUTPUT" | grep -c "EtcdMember" || echo "0")
+    
+    if [[ $ETCD_MEMBER_COUNT -ge 1 ]]; then
+        echo "  ✓ etcd is healthy (${ETCD_WAIT}s)"
+        break
+    fi
+    
+    if [[ $((ETCD_WAIT % 10)) -eq 0 ]]; then
+        echo "    Waiting for etcd... (${ETCD_WAIT}s)"
+    fi
+    
+    sleep 5
+    ETCD_WAIT=$((ETCD_WAIT + 5))
+done
+
+if [[ $ETCD_WAIT -ge $ETCD_TIMEOUT ]]; then
+    echo "  WARNING: etcd may not be fully healthy"
+fi
+
 echo ""
 echo "  ✓ Bootstrap phase complete"
 echo ""
