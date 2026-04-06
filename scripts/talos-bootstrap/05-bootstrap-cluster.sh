@@ -143,7 +143,8 @@ NODE_CHECK_TIMEOUT=120
 
 while [[ $NODE_CHECK_WAIT -lt $NODE_CHECK_TIMEOUT ]]; do
     MEMBERS_OUTPUT=$(talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-    MEMBER_COUNT=$(echo "$MEMBERS_OUTPUT" | grep -c "Member" || echo "0")
+    MEMBER_COUNT=$(echo "$MEMBERS_OUTPUT" | grep -c "Member" 2>/dev/null || echo "0")
+    MEMBER_COUNT=$(echo "$MEMBER_COUNT" | tr -d '[:space:]')
     
     if [[ $MEMBER_COUNT -ge $EXPECTED_NODES ]]; then
         echo "  ✓ All $EXPECTED_NODES nodes present in cluster (${NODE_CHECK_WAIT}s)"
@@ -176,7 +177,8 @@ ETCD_TIMEOUT=60
 
 while [[ $ETCD_WAIT -lt $ETCD_TIMEOUT ]]; do
     ETCD_OUTPUT=$(talosctl get etcdmembers --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-    ETCD_MEMBER_COUNT=$(echo "$ETCD_OUTPUT" | grep -c "EtcdMember" || echo "0")
+    ETCD_MEMBER_COUNT=$(echo "$ETCD_OUTPUT" | grep -c "EtcdMember" 2>/dev/null || echo "0")
+    ETCD_MEMBER_COUNT=$(echo "$ETCD_MEMBER_COUNT" | tr -d '[:space:]')
     
     if [[ $ETCD_MEMBER_COUNT -ge 1 ]]; then
         echo "  ✓ etcd is healthy (${ETCD_WAIT}s)"
