@@ -1,15 +1,22 @@
 #!/bin/bash
 # =============================================================================
-# Install Kubernetes Components
+# Install Kubernetes Components - Orchestrator
 # =============================================================================
-# This script installs general Kubernetes components: CNI, metrics-server, etc.
+# This script orchestrates the installation of Kubernetes components by running
+# individual step scripts in sequence (following talos-bootstrap.sh pattern).
+#
+# Available Components:
+#   - CNI: Cilium (default), Calico, or Flannel
+#   - Metrics Server: Resource metrics for HPA
+#   - MetalLB: LoadBalancer Services for bare-metal clusters
 # =============================================================================
 
 set -euo pipefail
 
-# Load environment variables
+# Script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+STEPS_DIR="$SCRIPT_DIR/k8s-components"
 
 # Source .env file
 set -a
@@ -21,12 +28,20 @@ CILIUM_VERSION="${CILIUM_VERSION:-1.19.1}"
 CALICO_VERSION="${CALICO_VERSION:-3.28.0}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.7.1}"
 
+# MetalLB configuration
+METALLB_VERSION="${METALLB_VERSION:-0.14.8}"
+METALLB_IP_POOL_START="${METALLB_IP_POOL_START:-192.168.123.200}"
+METALLB_IP_POOL_END="${METALLB_IP_POOL_END:-192.168.123.250}"
+METALLB_MODE="${METALLB_MODE:-l2}"
+ENVOY_GATEWAY_LB_IP="${ENVOY_GATEWAY_LB_IP:-}"
+
 # Parse arguments
 INSTALL_ALL=true
 SPECIFIC_COMPONENT=""
 CNI_CHOICE="cilium"
 LIST_COMPONENTS=false
 INSTALL_METRICS=false
+INSTALL_METALLB=false
 
 while getopts "c:m-:" opt; do
     case $opt in
@@ -39,381 +54,168 @@ while getopts "c:m-:" opt; do
                 cni-calico) CNI_CHOICE="calico"; INSTALL_ALL=false ;;
                 cni-flannel) CNI_CHOICE="flannel"; INSTALL_ALL=false ;;
                 with-metrics) INSTALL_METRICS=true ;;
+                with-metallb) INSTALL_METALLB=true ;;
                 *) echo "Unknown option: --${OPTARG}"; exit 1 ;;
             esac
             ;;
-        *) echo "Usage: $0 [-c component] [-m] [--list] [--cni-cilium] [--cni-calico] [--cni-flannel] [--with-metrics]"; exit 1 ;;
+        *) echo "Usage: $0 [-c component] [-m] [--list] [--cni-cilium] [--cni-calico] [--cni-flannel] [--with-metrics] [--with-metallb]"; exit 1 ;;
     esac
 done
-
-# Available components
-declare -A COMPONENTS=(
-    ["cilium"]="Cilium CNI - eBPF-based networking with L7 policies"
-    ["calico"]="Calico CNI - BGP-based networking with network policies"
-    ["flannel"]="Flannel CNI - Simple overlay networking"
-    ["metrics-server"]="Metrics Server - Resource metrics for HPA"
-    ["coredns"]="CoreDNS - Cluster DNS (usually pre-installed)"
-)
 
 # Show available components
 if [[ "$LIST_COMPONENTS" == "true" ]]; then
     echo "Available Kubernetes components:"
     echo ""
-    for key in "${!COMPONENTS[@]}"; do
-        echo "  $key - ${COMPONENTS[$key]}"
-    done
+    echo "  CNI Providers:"
+    echo "    cilium          - Cilium CNI - eBPF-based networking with L7 policies (default)"
+    echo "    calico          - Calico CNI - BGP-based networking with network policies"
+    echo "    flannel         - Flannel CNI - Simple overlay networking"
+    echo ""
+    echo "  Add-on Components:"
+    echo "    metrics-server  - Metrics Server - Resource metrics for HPA"
+    echo "    metallb         - MetalLB LoadBalancer - External IP for Services"
     echo ""
     echo "Usage:"
-    echo "  $0                    # Install Cilium + metrics-server (default)"
-    echo "  $0 --cni-cilium       # Install Cilium only"
-    echo "  $0 --cni-calico       # Install Calico only"
-    echo "  $0 --cni-flannel      # Install Flannel only"
-    echo "  $0 -c metrics-server  # Install metrics-server only"
-    echo "  $0 --list             # Show this help"
+    echo "  $0                           # Install Cilium only (default)"
+    echo "  $0 --cni-cilium              # Install Cilium only"
+    echo "  $0 --cni-calico              # Install Calico only"
+    echo "  $0 --cni-flannel             # Install Flannel only"
+    echo "  $0 --with-metrics            # Install CNI + metrics-server"
+    echo "  $0 --with-metallb            # Install CNI + MetalLB"
+    echo "  $0 --with-metrics --with-metallb  # Install all components"
+    echo "  $0 -c metrics-server         # Install metrics-server only"
+    echo "  $0 -c metallb                # Install MetalLB only"
+    echo "  $0 --list                    # Show this help"
+    echo ""
+    echo "Configuration (.env):"
+    echo "  CILIUM_VERSION=$CILIUM_VERSION"
+    echo "  METALLB_IP_POOL_START=$METALLB_IP_POOL_START"
+    echo "  METALLB_IP_POOL_END=$METALLB_IP_POOL_END"
+    echo "  METALLB_MODE=$METALLB_MODE"
     echo ""
     exit 0
 fi
 
+# =============================================================================
+# Main Script
+# =============================================================================
 echo "=== Kubernetes Components Installation ==="
 echo ""
-
-# Set default kubeconfig if not already set
-if [[ -z "${KUBECONFIG:-}" ]]; then
-    DEFAULT_KUBECONFIG="$PROJECT_ROOT/talos-cluster/kubeconfig"
-    if [[ -f "$DEFAULT_KUBECONFIG" ]]; then
-        export KUBECONFIG="$DEFAULT_KUBECONFIG"
-        echo "Using kubeconfig: $KUBECONFIG"
+echo "Configuration:"
+echo "  CNI:            $CNI_CHOICE"
+echo "  Metrics Server: $INSTALL_METRICS"
+echo "  MetalLB:        $INSTALL_METALLB"
+if [[ "$INSTALL_METALLB" == "true" ]]; then
+    echo "  IP Pool:        $METALLB_IP_POOL_START-$METALLB_IP_POOL_END"
+    echo "  Mode:           $METALLB_MODE"
+    if [[ -n "$ENVOY_GATEWAY_LB_IP" ]]; then
+        echo "  Envoy GW IP:    $ENVOY_GATEWAY_LB_IP"
     fi
 fi
-
-# =============================================================================
-# Prerequisites Check
-# =============================================================================
-echo "[Pre] Checking prerequisites..."
-
-# Check kubectl
-if ! command -v kubectl &>/dev/null; then
-    echo "ERROR: kubectl not found"
-    echo "  Install: curl -LO \"https://dl.k8s.io/release/\$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""
-    exit 1
-fi
-echo "  ✓ kubectl: $(kubectl version --client --short 2>/dev/null || echo 'installed')"
-
-# Check cluster connectivity
-if ! kubectl cluster-info &>/dev/null; then
-    echo "ERROR: Cannot connect to Kubernetes cluster"
-    echo "  Ensure cluster is bootstrapped: ./scripts/talos-bootstrap.sh"
-    exit 1
-fi
-echo "  ✓ Cluster: $(kubectl config current-context 2>/dev/null || echo 'connected')"
-
-# Check nodes
-NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
-if (( NODE_COUNT == 0 )); then
-    echo "ERROR: No nodes registered in cluster"
-    exit 1
-fi
-echo "  ✓ Nodes: $NODE_COUNT"
 echo ""
 
 # =============================================================================
-# Component Installation Functions
+# Step Functions
 # =============================================================================
 
-install_cilium() {
-    echo "[1/2] Installing Cilium CNI (latest stable)..."
-
-    # Check if Cilium already exists
-    if kubectl get pods -n kube-system -l k8s-app=cilium &>/dev/null; then
-        CILIUM_PODS=$(kubectl get pods -n kube-system -l k8s-app=cilium --no-headers 2>/dev/null | wc -l)
-        if (( CILIUM_PODS > 0 )); then
-            echo "  Cilium already installed ($CILIUM_PODS pods)"
-            echo "  ✓ Skipped"
-            return 0
-        fi
-    fi
-
-    # Remove Flannel CNI if present (required before installing Cilium)
-    echo "  Removing Flannel CNI (if present)..."
-    kubectl delete daemonset kube-flannel -n kube-system --ignore-not-found 2>/dev/null || true
-    kubectl delete -f "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml" --ignore-not-found 2>/dev/null || true
-    kubectl delete pod -n kube-system -l app=flannel --force --grace-period=0 --ignore-not-found 2>/dev/null || true
-    kubectl delete ns kube-flannel --ignore-not-found 2>/dev/null || true
-    echo "  ✓ Flannel removed"
-
-    # Remove Calico if present
-    if kubectl get ns calico-system &>/dev/null; then
-        echo "  Removing Calico (if present)..."
-        kubectl delete -f "https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml" --ignore-not-found 2>/dev/null || true
-        kubectl delete ns calico-system --ignore-not-found 2>/dev/null || true
-        echo "  ✓ Calico removed"
-    fi
-
-    # Wait for old CNI pods to terminate
-    echo "  Waiting for old CNI pods to terminate..."
-    sleep 15
-
-    # Check eBPF support
-    echo "  Checking eBPF support..."
-    KERNEL_VERSION=$(uname -r | cut -d'-' -f1)
-    KERNEL_MAJOR=$(echo "$KERNEL_VERSION" | cut -d'.' -f1)
-    KERNEL_MINOR=$(echo "$KERNEL_VERSION" | cut -d'.' -f2)
-
-    if (( KERNEL_MAJOR > 5 )) || (( KERNEL_MAJOR == 5 && KERNEL_MINOR >= 4 )); then
-        echo "  ✓ Kernel $KERNEL_VERSION supports eBPF"
-    else
-        echo "  ⚠ Kernel $KERNEL_VERSION may have limited eBPF support"
-    fi
-
-    # Install Cilium CLI if not present
-    if ! command -v cilium &>/dev/null; then
-        echo "  Installing Cilium CLI..."
-        CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/master/stable.txt)
-        CLI_ARCH="amd64"
-        if [[ "$(uname -m)" == "aarch64" ]]; then CLI_ARCH="arm64"; fi
-        curl -sL --fail --remote-name-all \
-            https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
-        sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
-        sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
-        rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
-        echo "  ✓ Cilium CLI installed"
-    fi
-
-    # Install Cilium using cilium CLI (simpler and more reliable)
-    echo "  Installing Cilium for Talos Linux with kube-proxy replacement..."
-
-    # Use cilium install command with Talos-compatible settings
-    cilium install \
-        --set kubeProxyReplacement=true \
-        --set bpf.masquerade=true \
-        --set ipam.mode=kubernetes \
-        --set securityContext.privileged=true \
-        --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
-        --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}" \
-        --set cni.chainingMode=none \
-        --set cni.customConf=false \
-        --set hubble.enabled=false \
-        --wait
-
-    # Wait for Cilium pods to be ready
-    echo "  Waiting for Cilium pods to be ready..."
-    sleep 10
-    kubectl wait --for=condition=ready pod -l k8s-app=cilium -n kube-system --timeout=300s 2>/dev/null || {
-        echo "  WARNING: Cilium pods not ready within timeout, checking status..."
-    }
-
-    # Remove kube-proxy (Cilium replaces it)
-    echo "  Removing kube-proxy (replaced by Cilium)..."
-    kubectl delete daemonset kube-proxy -n kube-system --ignore-not-found 2>/dev/null || true
-    kubectl delete pod -n kube-system -l k8s-app=kube-proxy --force --grace-period=0 --ignore-not-found 2>/dev/null || true
-
-    echo "  ✓ Cilium installed with kube-proxy replacement"
+step_01_check_prerequisites() {
+    bash "$STEPS_DIR/01-check-prerequisites.sh"
 }
 
-install_calico() {
-    echo "[1/2] Installing Calico CNI $CALICO_VERSION..."
-
-    # Check if Calico already exists
-    if kubectl get pods -n calico-system -l k8s-app=calico-node &>/dev/null; then
-        CALICO_PODS=$(kubectl get pods -n calico-system -l k8s-app=calico-node --no-headers 2>/dev/null | wc -l)
-        if (( CALICO_PODS > 0 )); then
-            echo "  Calico already installed ($CALICO_PODS pods)"
-            echo "  ✓ Skipped"
-            return 0
-        fi
-    fi
-
-    # Check if any CNI is installed
-    if kubectl get pods -n kube-system | grep -E "(flannel|cilium|weave)" &>/dev/null; then
-        echo "  WARNING: Another CNI detected. Removing..."
-        kubectl delete -f "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml" --ignore-not-found 2>/dev/null || true
-    fi
-
-    # Install Calico
-    echo "  Installing Calico $CALICO_VERSION..."
-    curl -o /tmp/calico.yaml "https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml"
-
-    # Modify CIDR if needed (match your cluster's pod CIDR)
-    kubectl apply -f /tmp/calico.yaml
-
-    # Wait for Calico pods
-    echo "  Waiting for Calico pods..."
-    kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n calico-system --timeout=300s 2>/dev/null || {
-        echo "  WARNING: Calico pods not ready within timeout"
-    }
-
-    rm -f /tmp/calico.yaml
-    echo "  ✓ Calico installed"
-}
-
-install_flannel() {
-    echo "[1/2] Installing Flannel CNI..."
-
-    # Check if Flannel already exists
-    if kubectl get pods -n kube-system -l app=flannel &>/dev/null; then
-        FLANNEL_PODS=$(kubectl get pods -n kube-system -l app=flannel --no-headers 2>/dev/null | wc -l)
-        if (( FLANNEL_PODS > 0 )); then
-            echo "  Flannel already installed ($FLANNEL_PODS pods)"
-            echo "  ✓ Skipped"
-            return 0
-        fi
-    fi
-
-    # Check if any CNI is installed
-    if kubectl get pods -n kube-system | grep -E "(calico|cilium|weave)" &>/dev/null; then
-        echo "  Another CNI detected, skipping Flannel installation"
-        echo "  ✓ Skipped"
-        return 0
-    fi
-
-    # Install Flannel
-    echo "  Installing Flannel..."
-    kubectl apply -f "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml"
-
-    # Wait for Flannel pods
-    echo "  Waiting for Flannel pods..."
-    kubectl wait --for=condition=ready pod -l app=flannel -n kube-system --timeout=120s 2>/dev/null || {
-        echo "  WARNING: Flannel pods not ready within timeout"
-    }
-
-    echo "  ✓ Flannel installed"
-}
-
-install_metrics_server() {
-    echo "[2/2] Installing metrics-server..."
-
-    # Check if metrics-server already exists
-    if kubectl get pods -n kube-system -l k8s-app=metrics-server &>/dev/null; then
-        MS_PODS=$(kubectl get pods -n kube-system -l k8s-app=metrics-server --no-headers 2>/dev/null | wc -l)
-        if (( MS_PODS > 0 )); then
-            echo "  metrics-server already installed ($MS_PODS pods)"
-            echo "  ✓ Skipped"
-            return 0
-        fi
-    fi
-
-    # Install metrics-server
-    echo "  Installing metrics-server $METRICS_SERVER_VERSION..."
-    kubectl apply -f "https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml"
-
-    # Patch for Talos (disable TLS verification for kubelet)
-    echo "  Patching for Talos compatibility..."
-    kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
-        {"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"},
-        {"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP"}
-    ]' 2>/dev/null || true
-
-    # Wait for metrics-server
-    echo "  Waiting for metrics-server..."
-    kubectl wait --for=condition=ready pod -l k8s-app=metrics-server -n kube-system --timeout=120s 2>/dev/null || {
-        echo "  WARNING: metrics-server not ready within timeout"
-    }
-
-    echo "  ✓ metrics-server installed"
-}
-
-# =============================================================================
-# Install Components
-# =============================================================================
-
-if [[ "$INSTALL_ALL" == "true" ]]; then
-    echo "Installing Cilium CNI (default)..."
-    echo ""
-
-    # Install selected CNI
+step_02_install_cni() {
     case "$CNI_CHOICE" in
         cilium)
-            install_cilium
+            CILIUM_VERSION="$CILIUM_VERSION" \
+            CILIUM_KUBE_PROXY_REPLACEMENT="$CILIUM_KUBE_PROXY_REPLACEMENT" \
+            CILIUM_HUBBLE_ENABLED="$CILIUM_HUBBLE_ENABLED" \
+            CILIUM_HUBBLE_RELAY_ENABLED="$CILIUM_HUBBLE_RELAY_ENABLED" \
+            bash "$STEPS_DIR/02-install-cilium.sh"
             ;;
         calico)
-            install_calico
+            CALICO_VERSION="$CALICO_VERSION" bash "$STEPS_DIR/02-install-calico.sh"
             ;;
         flannel)
-            install_flannel
+            bash "$STEPS_DIR/02-install-flannel.sh"
             ;;
     esac
-    echo ""
+}
 
-    # Only install metrics-server if explicitly requested
-    if [[ "$INSTALL_METRICS" == "true" ]]; then
-        install_metrics_server
+step_03_install_metrics() {
+    METRICS_SERVER_VERSION="$METRICS_SERVER_VERSION" bash "$STEPS_DIR/03-install-metrics-server.sh"
+}
+
+step_04_install_metallb() {
+    METALLB_VERSION="$METALLB_VERSION" \
+    METALLB_IP_POOL_START="$METALLB_IP_POOL_START" \
+    METALLB_IP_POOL_END="$METALLB_IP_POOL_END" \
+    METALLB_MODE="$METALLB_MODE" \
+    ENVOY_GATEWAY_LB_IP="$ENVOY_GATEWAY_LB_IP" \
+    EXPOSE_HUBBLE_UI="$EXPOSE_HUBBLE_UI" \
+    HUBBLE_UI_LB_IP="$HUBBLE_UI_LB_IP" \
+    EXPOSE_K8S_DASHBOARD="$EXPOSE_K8S_DASHBOARD" \
+    K8S_DASHBOARD_LB_IP="$K8S_DASHBOARD_LB_IP" \
+    bash "$STEPS_DIR/04-install-metallb.sh"
+}
+
+step_05_verify() {
+    bash "$STEPS_DIR/05-verify-installation.sh" "$CNI_CHOICE" "$INSTALL_METRICS" "$INSTALL_METALLB"
+}
+
+# =============================================================================
+# Helper Function
+# =============================================================================
+
+run_step_sync() {
+    local step_name="$1"
+    local step_func="$2"
+
+    echo "Starting: $step_name"
+
+    if $step_func; then
+        echo "  ✓ Completed"
+    else
+        echo "  ✗ Failed"
         echo ""
+        echo "═══════════════════════════════════════════════════════════"
+        echo "  Installation failed at: $step_name"
+        echo "═══════════════════════════════════════════════════════════"
+        echo ""
+        echo "Troubleshooting:"
+        echo "  1. Check the error message above"
+        echo "  2. Verify cluster connectivity: kubectl get nodes"
+        echo "  3. Re-run script: $0"
+        echo ""
+        exit 1
     fi
-else
-    case "$SPECIFIC_COMPONENT" in
-        cilium)
-            install_cilium
-            ;;
-        calico)
-            install_calico
-            ;;
-        flannel)
-            install_flannel
-            ;;
-        metrics-server)
-            install_metrics_server
-            ;;
-        coredns)
-            echo "CoreDNS is managed by Talos and cannot be installed manually"
-            echo "  Check status: kubectl get pods -n kube-system -l k8s-app=kube-dns"
-            ;;
-        *)
-            echo "ERROR: Unknown component: $SPECIFIC_COMPONENT"
-            echo "  Available: cilium, calico, flannel, metrics-server, coredns"
-            echo "  List all: $0 --list"
-            exit 1
-            ;;
-    esac
+    echo ""
+}
+
+# =============================================================================
+# Execute Steps
+# =============================================================================
+
+# Step 01: Always check prerequisites
+run_step_sync "01: Check prerequisites" "step_01_check_prerequisites"
+
+# Step 02: Install CNI
+if [[ "$INSTALL_ALL" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "" && "$INSTALL_METRICS" == "false" && "$INSTALL_METALLB" == "false" ]] || \
+   [[ "$SPECIFIC_COMPONENT" == "cilium" || "$SPECIFIC_COMPONENT" == "calico" || "$SPECIFIC_COMPONENT" == "flannel" ]]; then
+    run_step_sync "02: Install CNI ($CNI_CHOICE)" "step_02_install_cni"
 fi
 
-# =============================================================================
-# Verification
-# =============================================================================
-echo "=== Verification ==="
-echo ""
+# Step 03: Install metrics-server (only if explicitly requested)
+if [[ "$INSTALL_METRICS" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
+    run_step_sync "03: Install metrics-server" "step_03_install_metrics"
+fi
 
-echo "Pods in kube-system:"
-kubectl get pods -n kube-system --sort-by='.metadata.creationTimestamp'
-echo ""
+# Step 04: Install MetalLB (only if explicitly requested)
+if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
+    run_step_sync "04: Install MetalLB" "step_04_install_metallb"
+fi
 
-echo "Nodes:"
-kubectl get nodes -o wide
-echo ""
-
-# CNI-specific verification
-echo "CNI Status:"
-case "$CNI_CHOICE" in
-    cilium)
-        if command -v cilium &>/dev/null; then
-            cilium status 2>/dev/null || echo "  (Cilium CLI not available)"
-        fi
-        echo ""
-        echo "Hubble Status:"
-        if kubectl get pods -n kube-system -l k8s-app=hubble-relay &>/dev/null; then
-            kubectl get pods -n kube-system -l k8s-app=hubble-relay 2>/dev/null || echo "  (Hubble not ready)"
-        else
-            echo "  (Hubble not installed)"
-        fi
-        ;;
-    calico)
-        kubectl get pods -n calico-system 2>/dev/null || echo "  (Calico pods not found)"
-        ;;
-    flannel)
-        kubectl get pods -n kube-system -l app=flannel 2>/dev/null || echo "  (Flannel pods not found)"
-        ;;
-esac
-echo ""
-
-# Test metrics API (if metrics-server installed)
-if [[ "$INSTALL_ALL" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
-    echo "Testing metrics API (may take a minute to populate):"
-    sleep 10
-    if kubectl top nodes &>/dev/null; then
-        kubectl top nodes
-    else
-        echo "  (metrics not yet available, try again in 1-2 minutes)"
-    fi
-    echo ""
+# Step 05: Verify installation (if anything was installed)
+if [[ "$INSTALL_ALL" == "true" ]] || [[ "$SPECIFIC_COMPONENT" != "" ]] || [[ "$INSTALL_METRICS" == "true" ]] || [[ "$INSTALL_METALLB" == "true" ]]; then
+    run_step_sync "05: Verify installation" "step_05_verify"
 fi
 
 # =============================================================================
@@ -422,42 +224,31 @@ fi
 echo "=== Installation Summary ==="
 echo ""
 echo "Installed components:"
-case "$CNI_CHOICE" in
-    cilium)
-        echo "  ✓ Cilium CNI - eBPF-based pod networking"
-        echo "  ✓ kube-proxy replacement - BPF-based service routing"
-        ;;
-    calico)
-        echo "  ✓ Calico CNI - BGP-based pod networking"
-        ;;
-    flannel)
-        echo "  ✓ Flannel CNI - Simple overlay pod networking"
-        ;;
-esac
+echo "  ✓ $CNI_CHOICE CNI"
 if [[ "$INSTALL_METRICS" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
-    echo "  ✓ metrics-server - Resource metrics for HPA"
-else
-    echo "  ✗ metrics-server - Not installed (add --with-metrics or -m to install)"
+    echo "  ✓ metrics-server"
+fi
+if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
+    echo "  ✓ MetalLB LoadBalancer"
+    if [[ -n "$ENVOY_GATEWAY_LB_IP" ]]; then
+        echo "  ✓ Envoy Gateway dedicated IP: $ENVOY_GATEWAY_LB_IP"
+    fi
 fi
 echo ""
-echo "Next steps:"
-echo "  1. Verify CNI is working:"
-echo "     kubectl run test --image=nginx --restart=Never"
-echo "     kubectl get pods -o wide"
+echo "Configuration files: $PROJECT_ROOT/.env"
 echo ""
-if [[ "$CNI_CHOICE" == "cilium" ]]; then
-    echo "  2. Check Cilium status:"
-    echo "     cilium status"
+echo "Next steps:"
+echo "  1. Verify cluster:"
+echo "     kubectl get nodes"
+echo "     kubectl get pods -A"
+echo ""
+if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
+    echo "  2. Test LoadBalancer Service:"
+    echo "     See: docs/09-MetalLB-LoadBalancer.md"
     echo ""
-    echo "  3. Install metrics-server for HPA (optional):"
-    echo "     $0 -m"
-    echo ""
-    echo "  4. Install Istio with Envoy Gateway (optional):"
+    echo "  3. Install Istio with Envoy Gateway:"
     echo "     ./scripts/istio-install.sh"
-    echo ""
-else
-    echo "  2. Install metrics-server for HPA:"
-    echo "     $0 -m"
     echo ""
 fi
 echo "=== Components Installation Complete ==="
+

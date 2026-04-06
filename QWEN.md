@@ -35,6 +35,7 @@ This project sets up a **Talos Linux Kubernetes cluster** using Vagrant and libv
 | **Hubble** | Network observability (bundled with Cilium) |
 | **Infisical** | Secret manager with web dashboard |
 | **Istio + Envoy Gateway** | Service mesh and API gateway |
+| **MetalLB** | LoadBalancer Services for bare-metal clusters |
 | **metrics-server** | Resource metrics for HPA |
 
 > **Note:** Calico or Flannel can be used instead of Cilium via `./scripts/k8s-components.sh --cni-calico` or `--cni-flannel`
@@ -121,7 +122,7 @@ cp .env.example .env
 | `./scripts/vms-startup.sh` | Start all VMs | `-s` skip cleanup, `-f` force reset, `-v` verbose |
 | `./scripts/vms-cleanup.sh` | Stop and remove VMs | `-n` preserve network |
 | `./scripts/talos-bootstrap.sh` | Bootstrap Talos cluster | `-n <name>` cluster name, `--no-merge` kubeconfig |
-| `./scripts/k8s-components.sh` | Install CNI + metrics | `--cni-cilium`, `--cni-calico`, `--cni-flannel`, `--list` |
+| `./scripts/k8s-components.sh` | Install CNI + metrics + MetalLB | `--cni-cilium`, `--cni-calico`, `--cni-flannel`, `--with-metrics`, `--with-metallb`, `--list` |
 | `./scripts/istio-install.sh` | Install Istio (preview) | - |
 | `./scripts/prepare-network.sh` | Setup libvirt network | - |
 
@@ -316,35 +317,45 @@ mkdir -p .vagrant/raw-disks
    ./scripts/k8s-components.sh
    ```
 
-2. **Install Infisical Secret Manager (optional - for secret management):**
+2. **Install MetalLB LoadBalancer (optional - for external Services):**
+   ```bash
+   ./scripts/k8s-components.sh --with-metallb
+   # Or install everything: --with-metrics --with-metallb
+   
+   # Verify MetalLB
+   kubectl get pods -n metallb-system
+   kubectl get ipaddresspools.metallb.io -n metallb-system
+   ```
+
+3. **Install Infisical Secret Manager (optional - for secret management):**
    ```bash
    ./scripts/infisical-install.sh
    # Access dashboard: kubectl port-forward svc/infisical-ui -n infisical 8081:80
    ```
 
-3. **Deploy sample application:**
+4. **Deploy sample application:**
    ```bash
    kubectl apply -f docs/examples/sample-app.yaml
    ```
 
-4. **Configure HPA:**
+5. **Configure HPA:**
    ```bash
    kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
    ```
 
-5. **Generate load and observe scaling:**
+6. **Generate load and observe scaling:**
    ```bash
    kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
      /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
    ```
 
-6. **Monitor with Hubble (Cilium observability):**
+7. **Monitor with Hubble (Cilium observability):**
    ```bash
    kubectl port-forward -n kube-system svc/hubble-ui 8080:80
    # Then open http://localhost:8080
    ```
 
-7. **Monitor with Istio (if installed):**
+8. **Monitor with Istio (if installed):**
    ```bash
    kubectl port-forward -n istio-system svc/grafana 3000:3000
    ```
@@ -357,6 +368,7 @@ mkdir -p .vagrant/raw-disks
 - [Vagrant libvirt Provider](https://github.com/vagrant-libvirt/vagrant-libvirt)
 - [Kubernetes HPA](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
 - [Cilium & Hubble](https://cilium.io/)
+- [MetalLB LoadBalancer](https://metallb.universe.tf/)
 - [Infisical Secret Manager](https://infisical.com/)
 - [Istio Documentation](https://istio.io/)
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
