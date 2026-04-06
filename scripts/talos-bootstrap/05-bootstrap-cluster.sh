@@ -58,12 +58,26 @@ elif echo "$VERSION_OUTPUT" | grep -q "Tag:" && echo "$VERSION_OUTPUT" | grep -q
     echo "  ✓ Node is in cluster mode (already configured)"
     echo "  Checking if cluster is already bootstrapped..."
     
+    # Wait for node to be fully ready after reboot
+    echo "  Waiting for node to be fully initialized..."
+    for i in $(seq 1 20); do
+        if talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Member"; then
+            echo "  ✓ Node is fully initialized (${i}s)"
+            break
+        fi
+        if [[ $((i % 5)) -eq 0 ]]; then
+            echo "  ... waiting for cluster membership (${i}s)"
+        fi
+        sleep 3
+    done
+    
     # Check if cluster is already bootstrapped
     if talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Member"; then
         echo "  ✓ Cluster is already bootstrapped"
         echo "  Skipping bootstrap, continuing to apply configs..."
     else
-        echo "  Cluster not bootstrapped yet, attempting bootstrap..."
+        echo "  WARNING: Cluster members not accessible"
+        echo "  Attempting bootstrap anyway..."
     fi
 else
     echo "  WARNING: Unexpected response from node"
@@ -95,18 +109,29 @@ if [[ "$BOOTSTRAP_SUCCESS" != "true" ]]; then
     echo "  WARNING: Bootstrap command failed"
     echo "  Checking if cluster is already bootstrapped..."
     
-    # Check if node is already in cluster mode
+    # Wait for node to be fully ready after reboot/transition
+    echo "  Waiting for cluster to stabilize..."
+    for i in $(seq 1 30); do
+        check_output=$(talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+        if echo "$check_output" | grep -q "Member"; then
+            echo "  ✓ Cluster is stable (${i}s)"
+            break
+        fi
+        if [[ $((i % 5)) -eq 0 ]]; then
+            echo "  ... waiting for cluster stability (${i}s)"
+        fi
+        sleep 3
+    done
+    
+    # Final check
     check_output=$(talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
     if echo "$check_output" | grep -q "Member"; then
         echo "  ✓ Cluster is already bootstrapped"
         echo "  Skipping bootstrap, continuing to apply configs..."
     else
-        echo "  ERROR: Bootstrap failed and cluster not accessible"
-        echo ""
-        echo "  Troubleshooting:"
-        echo "  1. Check node status: talosctl version --nodes $MASTER_IP --endpoints $MASTER_IP --talosconfig $CONFIG_DIR/talosconfig"
-        echo "  2. Check maintenance mode: talosctl version --nodes $MASTER_IP --endpoints $MASTER_IP --insecure"
-        exit 1
+        echo "  WARNING: Bootstrap failed and cluster membership not detected"
+        echo "  This may be normal if node is still initializing"
+        echo "  Continuing to apply configs anyway..."
     fi
 fi
 

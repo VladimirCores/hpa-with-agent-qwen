@@ -23,6 +23,10 @@ else
     exit 1
 fi
 
+# Set defaults for variables that may not be in .env
+CONFIG_DIR="${CONFIG_DIR:-$PROJECT_ROOT/talos-cluster}"
+export CONFIG_DIR
+
 # Parse arguments
 MERGE_KUBECONFIG=true
 CUSTOM_CLUSTER_NAME=""
