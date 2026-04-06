@@ -84,42 +84,26 @@ if grep -q "disk: /dev/vda" "$CONFIG_DIR/worker.yaml"; then
     echo "  ✓ Verified: worker.yaml uses /dev/vda"
 fi
 
-# Extract certificates for reference using bash only
+# Extract certificates for reference (non-critical, skip if fails)
 echo ""
 echo "  Extracting certificates..."
-
-# Function to extract and decode base64 certificate from YAML
-extract_cert() {
-    local file="$1"
-    local key_path="$2"
-    local output="$3"
-    
-    # Use grep and awk to extract base64 value from YAML
-    # This handles simple nested key paths like machine.ca.crt
-    local base64_value
-    base64_value=$(grep -A1 "${key_path}:" "$file" | tail -1 | awk '{print $1}' | tr -d '"')
-    
-    if [[ -n "$base64_value" ]]; then
-        echo "$base64_value" | base64 -d > "$output" 2>/dev/null
-        return $?
-    fi
-    return 1
-}
 
 # Function to extract cert/key pair from multi-document YAML
 extract_certs_from_yaml() {
     local input_file="$1"
     local certs_dir="$2"
-    
+
+    mkdir -p "$certs_dir"
+
     # Split multi-document YAML and process first document (machine config)
     local temp_file
     temp_file=$(mktemp)
-    
+
     # Extract first document only (before ---)
-    awk '/^---/{if(n)exit; n=1; next} n' "$input_file" > "$temp_file"
-    
+    awk '/^---/{if(n)exit; n=1; next} n' "$input_file" > "$temp_file" || true
+
     # Extract machine CA
-    if grep -q "machine:" "$temp_file"; then
+    if grep -q "machine:" "$temp_file" 2>/dev/null; then
         # Extract ca.crt for machine
         local in_ca=false
         local ca_crt="" ca_key=""
@@ -136,19 +120,19 @@ extract_certs_from_yaml() {
                 fi
             fi
         done < "$temp_file"
-        
+
         if [[ -n "$ca_crt" ]]; then
             echo "$ca_crt" | base64 -d > "$certs_dir/ca.crt" 2>/dev/null && \
-                echo "    ✓ ca.crt extracted"
+                echo "    ✓ ca.crt extracted" || true
         fi
         if [[ -n "$ca_key" ]]; then
             echo "$ca_key" | base64 -d > "$certs_dir/ca.key" 2>/dev/null && \
-                echo "    ✓ ca.key extracted"
+                echo "    ✓ ca.key extracted" || true
         fi
     fi
-    
+
     # Extract cluster CA (Kubernetes CA)
-    if grep -q "cluster:" "$temp_file"; then
+    if grep -q "cluster:" "$temp_file" 2>/dev/null; then
         local in_cluster=false in_ca=false
         local k8s_crt="" k8s_key=""
         while IFS= read -r line; do
@@ -168,34 +152,34 @@ extract_certs_from_yaml() {
                 fi
             fi
         done < "$temp_file"
-        
+
         if [[ -n "$k8s_crt" ]]; then
             echo "$k8s_crt" | base64 -d > "$certs_dir/k8s-ca.crt" 2>/dev/null && \
-                echo "    ✓ k8s-ca.crt extracted"
+                echo "    ✓ k8s-ca.crt extracted" || true
         fi
         if [[ -n "$k8s_key" ]]; then
             echo "$k8s_key" | base64 -d > "$certs_dir/k8s-ca.key" 2>/dev/null && \
-                echo "    ✓ k8s-ca.key extracted"
+                echo "    ✓ k8s-ca.key extracted" || true
         fi
     fi
-    
+
     rm -f "$temp_file"
 }
 
-# Extract certificates
-extract_certs_from_yaml "$CONFIG_DIR/controlplane.yaml" "$CERTS_DIR"
+# Extract certificates (non-fatal - just for reference)
+extract_certs_from_yaml "$CONFIG_DIR/controlplane.yaml" "$CERTS_DIR" 2>/dev/null || true
 
 # Count extracted files
-cert_count=$(ls -1 "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key 2>/dev/null | wc -l)
-echo "  Extracted $cert_count certificate files"
-
-echo ""
-echo "  Certificate files:"
-echo "    - certs/ca.crt, ca.key (Talos machine CA)"
-echo "    - certs/k8s-ca.crt, k8s-ca.key (Kubernetes CA)"
-echo "    - certs/aggregator-ca.crt, aggregator-ca.key (front-proxy)"
-echo "    - certs/etcd-ca.crt, etcd-ca.key (etcd CA)"
-echo "    - certs/sa.key (service account)"
+cert_count=$(ls -1 "$CERTS_DIR"/*.crt "$CERTS_DIR"/*.key 2>/dev/null | wc -l || echo "0")
+if [[ "$cert_count" -gt 0 ]]; then
+    echo "  Extracted $cert_count certificate files"
+    echo ""
+    echo "  Certificate files:"
+    echo "    - certs/ca.crt, ca.key (Talos machine CA)"
+    echo "    - certs/k8s-ca.crt, k8s-ca.key (Kubernetes CA)"
+else
+    echo "  ℹ Certificate extraction skipped (not required for bootstrap)"
+fi
 
 echo ""
 echo "  ✓ Machine configurations ready"
