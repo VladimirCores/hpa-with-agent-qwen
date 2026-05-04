@@ -35,10 +35,16 @@ echo "  Talos Version: $TALOS_VERSION"
 echo ""
 echo "  Generating configs..."
 
+# Determine compatible Kubernetes version for the target Talos version
+# Talos 1.12.x → Kubernetes 1.35.x, Talos 1.13.x → Kubernetes 1.36.x
+KUBERNETES_VERSION="${KUBERNETES_VERSION:-1.36.0}"
+echo "  Kubernetes Version: $KUBERNETES_VERSION"
+
 if talosctl gen config "$CLUSTER_NAME" "$ENDPOINT" \
     --output-dir "$CONFIG_DIR" \
     --with-secrets "$SECRETS_FILE" \
-    --talos-version "$TALOS_VERSION"; then
+    --talos-version "$TALOS_VERSION" \
+    --kubernetes-version "$KUBERNETES_VERSION"; then
     echo "  ✓ Configurations generated"
 else
     echo "  ERROR: Failed to generate configurations"
@@ -83,6 +89,26 @@ fi
 if grep -q "disk: /dev/vda" "$CONFIG_DIR/worker.yaml"; then
     echo "  ✓ Verified: worker.yaml uses /dev/vda"
 fi
+
+# Add registry mirror configuration for local image caching
+# Routes ghcr.io pulls through the local Docker registry on the host gateway
+# Determine the full Talos version (e.g. v1.13 → v1.13.0)
+INSTALLER_VERSION="${TALOS_VERSION}.0"
+echo "  Installer image version: $INSTALLER_VERSION"
+
+echo ""
+echo "  Adding registry mirror: ghcr.io → http://${NETWORK_IP}:5000..."
+for config_file in "$CONFIG_DIR/controlplane.yaml" "$CONFIG_DIR/worker.yaml"; do
+    yq -i eval '
+        select(.kind == null) |
+        .machine.registries.mirrors."ghcr.io".endpoints += ["http://'"${NETWORK_IP}"':5000"] |
+        .machine.registries.config."'"${NETWORK_IP}"':5000".tls.insecureSkipVerify = true |
+        .machine.install.image = "http://'"${NETWORK_IP}"':5000/siderolabs/installer:'"${INSTALLER_VERSION}"'"
+    ' "$config_file" 2>/dev/null || {
+        echo "  WARNING: Failed to add registry mirror to $config_file (yq failed, skipping)"
+    }
+done
+echo "  ✓ Registry mirror configured"
 
 # Extract certificates for reference (non-critical, skip if fails)
 # Disable strict error handling for this optional step

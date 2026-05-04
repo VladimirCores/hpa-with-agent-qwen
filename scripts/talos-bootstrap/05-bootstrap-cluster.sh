@@ -20,28 +20,34 @@ if [[ ! -f "$CONFIG_DIR/talosconfig" ]]; then
 fi
 
 # Check if node is in maintenance mode
+# Talos 1.13+: try secure connection with talosconfig
+# - TLS error ("certificate signed by unknown authority") → maintenance mode (or stale PKI)
+# - Success with version info → cluster mode, PKI matches
 echo "  Checking node maintenance mode..."
 
-# Talos v1.12.x: Use version command to detect maintenance mode
-# In maintenance mode: "API is not implemented in maintenance mode"
-# In cluster mode: Returns actual version info
-# Use explicit --endpoints since talosconfig may have empty endpoints
-# Note: talosctl returns non-zero in maintenance mode, so use || true
-VERSION_OUTPUT=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure 2>&1 || true)
+SECURE_OUTPUT=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
 
-if echo "$VERSION_OUTPUT" | grep -q "API is not implemented in maintenance mode"; then
-    echo "  ✓ Node is in maintenance mode (Talos v1.12.x)"
+if echo "$SECURE_OUTPUT" | grep -q "certificate signed by unknown authority"; then
+    echo "  ✓ Node is in maintenance mode (Talos v1.13+)"
     echo "  Applying config before bootstrap..."
-    talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1 || true
+    if ! talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1; then
+        echo "  ERROR: Failed to apply machine configuration"
+        echo "  The node may be running an incompatible Talos version"
+        echo "  Check that TALOS_VERSION matches the VM's Talos version"
+        exit 1
+    fi
+    echo "  Rebooting node to reload containerd with registry mirrors..."
+    talosctl reboot --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" --wait=false 2>&1 || true
+    sleep 5
     echo "  Waiting for node to reboot after config apply..."
-    sleep 60
+    sleep 10
     # Fix endpoints in talosconfig
-    sed -i 's/endpoints: \[\]/endpoints: ['$MASTER_IP']/g' "$CONFIG_DIR/talosconfig"
+    sed -i 's/endpoints: \[]/endpoints: ['$MASTER_IP']/g' "$CONFIG_DIR/talosconfig" 2>/dev/null || true
     # Wait for node to come back up with new PKI
     echo "  Waiting for node to come back online..."
     for i in $(seq 1 40); do
         local_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-        if echo "$local_output" | grep -q "Server:"; then
+        if echo "$local_output" | grep -q "Server:" && ! echo "$local_output" | grep -q "certificate signed by unknown authority"; then
             echo "  ✓ Node is back online (${i}s)"
             break
         fi
@@ -50,10 +56,10 @@ if echo "$VERSION_OUTPUT" | grep -q "API is not implemented in maintenance mode"
         fi
         sleep 3
     done
-elif echo "$VERSION_OUTPUT" | grep -q "Tag:" && echo "$VERSION_OUTPUT" | grep -q "Server:" && ! echo "$VERSION_OUTPUT" | grep -q "not implemented"; then
+elif echo "$SECURE_OUTPUT" | grep -q "Tag:" && echo "$SECURE_OUTPUT" | grep -q "Server:"; then
     echo "  ✓ Node is in cluster mode (already configured)"
     echo "  Checking if cluster is already bootstrapped..."
-    
+
     # Wait for node to be fully ready after reboot
     echo "  Waiting for node to be fully initialized..."
     for i in $(seq 1 20); do
@@ -66,7 +72,7 @@ elif echo "$VERSION_OUTPUT" | grep -q "Tag:" && echo "$VERSION_OUTPUT" | grep -q
         fi
         sleep 3
     done
-    
+
     # Check if cluster is already bootstrapped
     if talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Member"; then
         echo "  ✓ Cluster is already bootstrapped"
@@ -77,7 +83,7 @@ elif echo "$VERSION_OUTPUT" | grep -q "Tag:" && echo "$VERSION_OUTPUT" | grep -q
     fi
 else
     echo "  WARNING: Unexpected response from node"
-    echo "  Response: $(echo "$VERSION_OUTPUT" | head -5)"
+    echo "  Response: $(echo "$SECURE_OUTPUT" | head -5)"
     echo "  Proceeding anyway..."
 fi
 
@@ -104,7 +110,7 @@ done
 if [[ "$BOOTSTRAP_SUCCESS" != "true" ]]; then
     echo "  WARNING: Bootstrap command failed"
     echo "  Checking if cluster is already bootstrapped..."
-    
+
     # Wait for node to be fully ready after reboot/transition
     echo "  Waiting for cluster to stabilize..."
     for i in $(seq 1 30); do
@@ -118,7 +124,7 @@ if [[ "$BOOTSTRAP_SUCCESS" != "true" ]]; then
         fi
         sleep 3
     done
-    
+
     # Final check
     check_output=$(talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
     if echo "$check_output" | grep -q "Member"; then
@@ -145,7 +151,7 @@ while [[ $NODE_CHECK_WAIT -lt $NODE_CHECK_TIMEOUT ]]; do
     MEMBERS_OUTPUT=$(talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
     MEMBER_COUNT=$(echo "$MEMBERS_OUTPUT" | grep -c "Member" 2>/dev/null || echo "0")
     MEMBER_COUNT=$(echo "$MEMBER_COUNT" | tr -d '[:space:]')
-    
+
     if [[ $MEMBER_COUNT -ge $EXPECTED_NODES ]]; then
         echo "  ✓ All $EXPECTED_NODES nodes present in cluster (${NODE_CHECK_WAIT}s)"
         echo ""
@@ -155,11 +161,11 @@ while [[ $NODE_CHECK_WAIT -lt $NODE_CHECK_TIMEOUT ]]; do
         done
         break
     fi
-    
+
     if [[ $((NODE_CHECK_WAIT % 15)) -eq 0 ]] || [[ $NODE_CHECK_WAIT -lt 30 ]]; then
         echo "    Found $MEMBER_COUNT/$EXPECTED_NODES nodes... (${NODE_CHECK_WAIT}s)"
     fi
-    
+
     sleep $NODE_CHECK_INTERVAL
     NODE_CHECK_WAIT=$((NODE_CHECK_WAIT + NODE_CHECK_INTERVAL))
 done
@@ -179,16 +185,16 @@ while [[ $ETCD_WAIT -lt $ETCD_TIMEOUT ]]; do
     ETCD_OUTPUT=$(talosctl get etcdmembers --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
     ETCD_MEMBER_COUNT=$(echo "$ETCD_OUTPUT" | grep -c "EtcdMember" 2>/dev/null || echo "0")
     ETCD_MEMBER_COUNT=$(echo "$ETCD_MEMBER_COUNT" | tr -d '[:space:]')
-    
+
     if [[ $ETCD_MEMBER_COUNT -ge 1 ]]; then
         echo "  ✓ etcd is healthy (${ETCD_WAIT}s)"
         break
     fi
-    
+
     if [[ $((ETCD_WAIT % 10)) -eq 0 ]]; then
         echo "    Waiting for etcd... (${ETCD_WAIT}s)"
     fi
-    
+
     sleep 5
     ETCD_WAIT=$((ETCD_WAIT + 5))
 done

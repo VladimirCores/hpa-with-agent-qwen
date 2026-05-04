@@ -149,8 +149,21 @@ fi
 echo "  ✓ Libvirt network '$NETWORK_NAME' exists"
 
 # Check if network is active
-NETWORK_STATE=$(virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" 2>/dev/null | grep "State:" | awk '{print $2}')
-if [[ "$NETWORK_STATE" != "active" ]]; then
+echo "  DEBUG: Running: virsh -c $LIBVIRT_URI net-info $NETWORK_NAME"
+NETWORK_INFO=$(virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" 2>&1) || {
+    echo "  ✗ Failed to get network info for '$NETWORK_NAME'"
+    echo "    virsh output: $NETWORK_INFO"
+    echo "    Remediation:"
+    echo "      - Run: ./scripts/prepare-network.sh"
+    exit 1
+}
+echo "  DEBUG: net-info output:"
+echo "$NETWORK_INFO" | sed 's/^/    | /'
+
+NETWORK_STATE=$(echo "$NETWORK_INFO" | grep "Active:" | awk '{print $2}')
+echo "  DEBUG: Parsed network state: '$NETWORK_STATE'"
+
+if [[ "$NETWORK_STATE" != "yes" ]]; then
     echo "  ✗ Libvirt network '$NETWORK_NAME' is not active (state: $NETWORK_STATE)"
     echo "    Remediation:"
     echo "      - Run: virsh -c $LIBVIRT_URI net-start $NETWORK_NAME"

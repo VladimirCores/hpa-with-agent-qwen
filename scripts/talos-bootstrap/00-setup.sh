@@ -26,7 +26,7 @@ fi
 
 # Set defaults
 LIBVIRT_URI="${LIBVIRT_URI:-qemu:///system}"
-TALOS_VERSION="${TALOS_VERSION:-v1.12}"
+TALOS_VERSION="${TALOS_VERSION:-v1.13}"
 
 # Configuration directories
 CONFIG_DIR="$PROJECT_ROOT/talos-cluster"

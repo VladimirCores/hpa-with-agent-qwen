@@ -19,21 +19,15 @@ echo "  Timeout: 120s per node"
 echo ""
 
 # Function to check if node is responding
+# Talos 1.13+ returns Server info even in maintenance mode via --insecure
+# So we just check if the node is reachable (any version response)
 check_node() {
     local ip="$1"
     local output
     output=$(talosctl version --nodes "$ip" --endpoints "$ip" --insecure 2>&1 || true)
-    
-    # Check for various valid responses
-    if echo "$output" | grep -q "v1\."; then
-        # Has version info - could be maintenance or cluster mode
-        if echo "$output" | grep -q "not implemented"; then
-            echo "maintenance"
-        elif echo "$output" | grep -q "Server:"; then
-            echo "cluster"
-        else
-            echo "ready"
-        fi
+
+    if echo "$output" | grep -q "Tag:"; then
+        echo "ready"
     else
         echo "unreachable"
     fi
