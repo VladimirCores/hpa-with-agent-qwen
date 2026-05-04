@@ -88,6 +88,77 @@ if (( VM_COUNT != EXPECTED_VMS )); then
     exit 1
 fi
 
+# Check system resources
+echo "  Checking system resources..."
+
+# Calculate required resources
+REQUIRED_MEM=$((MASTER_MEMORY + WORKER_MEMORY * WORKER_COUNT))
+REQUIRED_CPU=$((MASTER_CPUS + WORKER_CPUS * WORKER_COUNT))
+REQUIRED_DISK=20000  # 20GB minimum in MB
+
+# Check available memory
+AVAILABLE_MEM=$(free -m | awk '/^Mem:/{print $7}')
+if [[ $AVAILABLE_MEM -lt $REQUIRED_MEM ]]; then
+    echo "  ✗ Insufficient memory: Available ${AVAILABLE_MEM}MB < Required ${REQUIRED_MEM}MB"
+    echo "    Required breakdown:"
+    echo "      - Master: ${MASTER_MEMORY}MB"
+    echo "      - Workers (${WORKER_COUNT}x): $((WORKER_MEMORY * WORKER_COUNT))MB"
+    echo "    Remediation:"
+    echo "      - Close other applications to free memory"
+    echo "      - Reduce MASTER_MEMORY or WORKER_MEMORY in .env"
+    echo "      - Reduce WORKER_COUNT in .env"
+    exit 1
+fi
+echo "  ✓ Memory: ${AVAILABLE_MEM}MB available (required: ${REQUIRED_MEM}MB)"
+
+# Check disk space
+AVAILABLE_DISK=$(df -m /var/lib/libvirt 2>/dev/null | awk 'NR==2{print $4}' || df -m / | awk 'NR==2{print $4}')
+if [[ $AVAILABLE_DISK -lt $REQUIRED_DISK ]]; then
+    echo "  ✗ Insufficient disk space: Available ${AVAILABLE_DISK}MB < Required ${REQUIRED_DISK}MB (20GB)"
+    echo "    Remediation:"
+    echo "      - Free up disk space on /var/lib/libvirt or root partition"
+    echo "      - Remove unused VMs or images"
+    echo "      - Ensure at least 20GB free for VM disks"
+    exit 1
+fi
+echo "  ✓ Disk: ${AVAILABLE_DISK}MB available (required: ${REQUIRED_DISK}MB)"
+
+# Check CPU cores
+CPU_CORES=$(nproc)
+if [[ $CPU_CORES -lt $REQUIRED_CPU ]]; then
+    echo "  ✗ Insufficient CPUs: Available ${CPU_CORES} < Required ${REQUIRED_CPU}"
+    echo "    Required breakdown:"
+    echo "      - Master: ${MASTER_CPUS} cores"
+    echo "      - Workers (${WORKER_COUNT}x): $((WORKER_CPUS * WORKER_COUNT)) cores"
+    echo "    Remediation:"
+    echo "      - Reduce MASTER_CPUS or WORKER_CPUS in .env"
+    echo "      - Reduce WORKER_COUNT in .env"
+    exit 1
+fi
+echo "  ✓ CPUs: ${CPU_CORES} cores available (required: ${REQUIRED_CPU})"
+
+# Check libvirt network exists
+echo "  Checking libvirt network configuration..."
+if ! virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" &>/dev/null; then
+    echo "  ✗ Libvirt network '$NETWORK_NAME' not found"
+    echo "    Remediation:"
+    echo "      - Run: ./scripts/prepare-network.sh"
+    echo "      - Or create network manually with virsh"
+    exit 1
+fi
+echo "  ✓ Libvirt network '$NETWORK_NAME' exists"
+
+# Check if network is active
+NETWORK_STATE=$(virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" 2>/dev/null | grep "State:" | awk '{print $2}')
+if [[ "$NETWORK_STATE" != "active" ]]; then
+    echo "  ✗ Libvirt network '$NETWORK_NAME' is not active (state: $NETWORK_STATE)"
+    echo "    Remediation:"
+    echo "      - Run: virsh -c $LIBVIRT_URI net-start $NETWORK_NAME"
+    echo "      - Or run: ./scripts/prepare-network.sh"
+    exit 1
+fi
+echo "  ✓ Libvirt network '$NETWORK_NAME' is active"
+
 echo ""
 echo "  ✓ All prerequisites met"
 echo ""

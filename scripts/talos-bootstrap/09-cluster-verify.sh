@@ -91,6 +91,39 @@ echo "Endpoint: https://$MASTER_IP:6443"
 echo "Master: $MASTER_NAME ($MASTER_IP)"
 echo "Workers: $WORKER_COUNT nodes"
 echo ""
+
+# Backup configuration
+backup_configuration() {
+    echo "=== Backing Up Configuration ==="
+
+    BACKUP_DIR="$CONFIG_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+
+    # Backup configs
+    cp "$CONFIG_DIR"/*.yaml "$BACKUP_DIR/" 2>/dev/null || true
+    cp "$CONFIG_DIR"/kubeconfig "$BACKUP_DIR/" 2>/dev/null || true
+    cp "$CONFIG_DIR"/talosconfig "$BACKUP_DIR/" 2>/dev/null || true
+
+    # Export current cluster state
+    KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get nodes -o yaml > "$BACKUP_DIR/nodes.yaml" 2>/dev/null || true
+    KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get pods -A -o yaml > "$BACKUP_DIR/pods.yaml" 2>/dev/null || true
+    KUBECONFIG="$CONFIG_DIR/kubeconfig" kubectl get svc -A -o yaml > "$BACKUP_DIR/services.yaml" 2>/dev/null || true
+
+    # Implement backup retention (keep last 10 backups)
+    if [[ -d "$CONFIG_DIR/backups" ]]; then
+        local backup_count=$(ls -1d "$CONFIG_DIR/backups"/*/ 2>/dev/null | wc -l)
+        if [[ $backup_count -gt 10 ]]; then
+            echo "  Cleaning up old backups (keeping last 10)..."
+            ls -1dt "$CONFIG_DIR/backups"/*/ | tail -n +11 | xargs rm -rf 2>/dev/null || true
+        fi
+    fi
+
+    echo "  ✓ Configuration backed up to: $BACKUP_DIR"
+    echo ""
+}
+
+backup_configuration
+
 echo "Configuration files: $CONFIG_DIR/"
 echo "  - secrets.yaml"
 echo "  - controlplane.yaml"
@@ -105,6 +138,8 @@ echo "  2. Install Cilium CNI:"
 echo "     ./scripts/k8s-components.sh --cni-cilium"
 echo "  3. Install metrics-server for HPA:"
 echo "     ./scripts/k8s-components.sh -m"
+echo "  4. Monitor cluster health:"
+echo "     ./scripts/cluster-health-monitor.sh"
 echo ""
 echo "  ✓ Cluster verification completed"
 echo ""

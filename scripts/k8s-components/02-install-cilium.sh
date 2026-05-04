@@ -141,9 +141,42 @@ if [[ "$CILIUM_HUBBLE_ENABLED" == "true" ]]; then
     kubectl wait --for=condition=ready pod -n kube-system -l k8s-app=hubble-ui --timeout=120s 2>/dev/null || {
         echo "  ⚠ Hubble UI not ready within timeout"
     }
-    
+
     echo "  ✓ Hubble UI enabled"
     echo "    Access: kubectl port-forward -n kube-system svc/hubble-ui 8080:80"
+
+    # Stabilize Hubble pods with automatic retry logic
+    echo "  Stabilizing Hubble pods..."
+    local max_retries=3
+    local retry_count=0
+
+    while [[ $retry_count -lt $max_retries ]]; do
+        # Check Hubble relay status
+        HUBBLE_RELAY_STATUS=$(kubectl get pod -n kube-system -l k8s-app=hubble-relay --no-headers 2>/dev/null | awk '{print $3}')
+        HUBBLE_UI_STATUS=$(kubectl get pod -n kube-system -l k8s-app=hubble-ui --no-headers 2>/dev/null | awk '{print $3}')
+
+        if [[ "$HUBBLE_RELAY_STATUS" == "CrashLoopBackOff" || "$HUBBLE_UI_STATUS" == "CrashLoopBackOff" ]]; then
+            echo "    ⚠ Hubble pods unstable (relay: $HUBBLE_RELAY_STATUS, ui: $HUBBLE_UI_STATUS), restarting... (attempt $((retry_count + 1))/$max_retries)"
+            kubectl rollout restart deployment hubble-relay -n kube-system 2>/dev/null || true
+            kubectl rollout restart deployment hubble-ui -n kube-system 2>/dev/null || true
+            sleep 30
+            retry_count=$((retry_count + 1))
+
+            # Wait for pods to stabilize
+            kubectl wait --for=condition=ready pod -n kube-system -l k8s-app=hubble-relay --timeout=60s 2>/dev/null || true
+            kubectl wait --for=condition=ready pod -n kube-system -l k8s-app=hubble-ui --timeout=60s 2>/dev/null || true
+        else
+            echo "    ✓ Hubble pods stable"
+            break
+        fi
+    done
+
+    if [[ $retry_count -ge $max_retries ]]; then
+        echo "  ⚠ WARNING: Hubble pods still unstable after $max_retries retries"
+        echo "    Manual intervention may be required:"
+        echo "      kubectl rollout restart deployment hubble-relay -n kube-system"
+        echo "      kubectl rollout restart deployment hubble-ui -n kube-system"
+    fi
 fi
 
 echo ""

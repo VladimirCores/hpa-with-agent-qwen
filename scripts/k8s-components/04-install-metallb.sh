@@ -14,6 +14,67 @@ source "$STEP_DIR/00-setup.sh"
 
 echo "[4/5] Installing MetalLB $METALLB_VERSION..."
 echo ""
+
+# Validate IP pool configuration
+validate_ip_pool() {
+    echo "  Validating IP pool configuration..."
+
+    # Parse IP addresses
+    IFS='.' read -r -a START_OCTETS <<< "$METALLB_IP_POOL_START"
+    IFS='.' read -r -a END_OCTETS <<< "$METALLB_IP_POOL_END"
+
+    # Validate IP range (start < end)
+    if [[ ${START_OCTETS[3]} -ge ${END_OCTETS[3]} ]]; then
+        echo "  ✗ Invalid IP range: start ($METALLB_IP_POOL_START) must be less than end ($METALLB_IP_POOL_END)"
+        return 1
+    fi
+
+    # Calculate pool size
+    local pool_size=$(( ${END_OCTETS[3]} - ${START_OCTETS[3]} + 1 ))
+    if [[ $pool_size -lt 10 ]]; then
+        echo "  ⚠ WARNING: IP pool size ($pool_size) is small (< 10 IPs)"
+        echo "    Consider expanding the pool for better scalability"
+    else
+        echo "  ✓ IP pool size: $pool_size addresses"
+    fi
+
+    # Check for conflicts with static IPs
+    local conflicts=0
+    if [[ -n "${MASTER_IP:-}" ]]; then
+        if [[ "$MASTER_IP" >= "$METALLB_IP_POOL_START" && "$MASTER_IP" <= "$METALLB_IP_POOL_END" ]]; then
+            echo "  ✗ Master IP $MASTER_IP conflicts with MetalLB pool"
+            conflicts=1
+        fi
+    fi
+
+    # Check worker IPs
+    for i in $(seq 1 $WORKER_COUNT); do
+        WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
+        if [[ "$WORKER_IP" >= "$METALLB_IP_POOL_START" && "$WORKER_IP" <= "$METALLB_IP_POOL_END" ]]; then
+            echo "  ✗ Worker IP $WORKER_IP conflicts with MetalLB pool"
+            conflicts=1
+        fi
+    done
+
+    if [[ $conflicts -gt 0 ]]; then
+        echo "  Remediation:"
+        echo "    - Adjust METALLB_IP_POOL_START and METALLB_IP_POOL_END in .env"
+        echo "    - Ensure pool doesn't overlap with node static IPs"
+        return 1
+    fi
+
+    echo "  ✓ No IP conflicts detected"
+    echo "  ✓ IP pool validation passed"
+}
+
+# Run validation
+if ! validate_ip_pool; then
+    echo ""
+    echo "  ERROR: IP pool validation failed"
+    exit 1
+fi
+
+echo ""
 echo "  Configuration:"
 echo "    IP Pool:      $METALLB_IP_POOL_START-$METALLB_IP_POOL_END"
 echo "    Mode:         $METALLB_MODE"

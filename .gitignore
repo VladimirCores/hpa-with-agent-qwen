@@ -2,6 +2,7 @@
 *.iso
 *.raw*
 *.qcow2
+*.patch
 iso/
 
 # Ignore Vagrant files
