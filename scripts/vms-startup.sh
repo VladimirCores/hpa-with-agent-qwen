@@ -23,11 +23,89 @@ NC='\033[0m' # No Color
 
 # Source .env file
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
+    echo -e "${BLUE}Loading configuration from .env file...${NC}"
+    
+    # First, check for common syntax issues before sourcing
+    env_errors=()
+    line_num=0
+    
+    # Check for unquoted angle brackets (common in ROOT_PASSWORD)
+    # Only check non-comment lines that contain '=' and extract the value part
+    while IFS=: read -r ln fullline; do
+        # Extract just the value part after '='
+        value_part="${fullline#*=}"
+        # Check if value (before any comment) has unquoted angle brackets
+        value_before_comment="${value_part%%#*}"
+        # Check if it's already quoted
+        if [[ "$value_before_comment" == *"<"*">"* ]] && [[ "$value_before_comment" != \"*\" ]] && [[ "$value_before_comment" != \'*\' ]]; then
+            env_errors+=("Line $ln: Unquoted angle brackets detected. Variables with special characters like < > must be quoted.")
+            env_errors+=("         Problem: $fullline")
+            env_errors+=("         Fix: Add quotes around the value, e.g., VAR=\"<value>\"")
+        fi
+    done < <(grep -n '^[^#]*=' "$PROJECT_ROOT/.env" 2>/dev/null || true)
+    
+    # Check for unquoted spaces in values (only non-comment lines with '=')
+    while IFS=: read -r ln fullline; do
+        # Extract just the value part after '='
+        value_part="${fullline#*=}"
+        # Check if value (before any comment) has unquoted spaces
+        value_before_comment="${value_part%%#*}"
+        # Trim trailing whitespace
+        value_before_comment="$(echo "$value_before_comment" | sed 's/[[:space:]]*$//')"
+        # Check for unquoted spaces (value contains space but isn't quoted)
+        if [[ "$value_before_comment" == *" "* ]] && [[ "$value_before_comment" != \"*\" ]] && [[ "$value_before_comment" != \'*\' ]]; then
+            env_errors+=("Line $ln: Unquoted spaces detected in value. Values with spaces must be quoted.")
+            env_errors+=("         Problem: $fullline")
+            env_errors+=("         Fix: Add quotes around the value, e.g., VAR=\"value with spaces\"")
+        fi
+    done < <(grep -n '^[^#]*=' "$PROJECT_ROOT/.env" 2>/dev/null || true)
+    
+    if [[ ${#env_errors[@]} -gt 0 ]]; then
+        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${RED}  ERROR: Syntax issues detected in .env file${NC}"
+        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        for error in "${env_errors[@]}"; do
+            echo -e "${RED}$error${NC}"
+        done
+        echo ""
+        echo -e "${YELLOW}Common causes:${NC}"
+        echo "  • ROOT_PASSWORD contains unquoted special characters like < or >"
+        echo "  • Other variables have unquoted spaces or special characters"
+        echo ""
+        echo -e "${YELLOW}Solution:${NC}"
+        echo "  Edit .env and quote values with special characters:"
+        echo "    ROOT_PASSWORD=\"<CHANGE_ME_SECURE_PASSWORD>\""
+        echo ""
+        exit 1
+    fi
+    
+    # Source the file if no errors found
     set -a
     source "$PROJECT_ROOT/.env"
     set +a
+    
+    # Validate critical variables
+    if [[ -z "${ROOT_PASSWORD:-}" ]]; then
+        echo -e "${YELLOW}⚠ WARNING: ROOT_PASSWORD is not set in .env${NC}"
+        echo "  This may cause authentication issues later."
+        echo "  Consider setting ROOT_PASSWORD in your .env file."
+        echo ""
+    else
+        echo -e "${GREEN}✓ ROOT_PASSWORD is configured${NC}"
+    fi
+    
+    echo -e "${GREEN}✓ Configuration loaded successfully${NC}"
+    echo ""
 else
     echo -e "${RED}ERROR: .env file not found in $PROJECT_ROOT${NC}" >&2
+    echo ""
+    echo "Solution:"
+    echo "  1. Copy the example file: cp .env.example .env"
+    echo "  2. Edit .env and configure all required variables"
+    echo "  3. Pay special attention to quoting values with special characters"
+    echo "     Example: ROOT_PASSWORD=\"<your_password>\""
+    echo ""
     exit 1
 fi
 
