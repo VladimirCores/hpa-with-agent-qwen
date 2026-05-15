@@ -142,6 +142,39 @@ This document tracks all improvements to be implemented for the Talos Kubernetes
 
 ## Priority 2 (P2) - Medium Priority Improvements
 
+### ✅ P2-0: Local Registry Image Caching
+**Files:** `scripts/populate-local-registry.sh`, `scripts/verify-local-registry.sh`, `docs/16-Local-Registry-Guide.md`
+**Status:** ✅ Complete
+**Estimated Effort:** 2 hours
+**Implemented:** 2025-01-XX
+
+**Tasks:**
+- [x] Expand image list to cover all cluster components
+- [x] Add Flannel, Calico CNI images
+- [x] Add Kubernetes Dashboard images
+- [x] Add Istio/Envoy Gateway images
+- [x] Add Infisical PostgreSQL images
+- [x] Add Cert Manager images
+- [x] Implement image caching with skip logic
+- [x] Add statistics tracking (success/failed/skipped)
+- [x] Create verification script for registry health
+- [x] Document setup and usage procedures
+
+**Acceptance Criteria:**
+- [x] All required cluster images are cached locally
+- [x] Talos nodes pull images from local registry
+- [x] Verification script confirms proper configuration
+- [x] Documentation provides clear setup instructions
+
+**Implementation Notes:**
+- Enhanced `populate-local-registry.sh` with 40+ images across all components
+- Added smart caching with duplicate detection
+- Created `verify-local-registry.sh` for health checks
+- Added comprehensive documentation in `docs/16-Local-Registry-Guide.md`
+- Registry mirrors configured automatically in Talos configs
+
+---
+
 ### ✅ P2-1: Add Configuration Backup
 **File:** `scripts/talos-bootstrap/09-cluster-verify.sh`
 **Status:** ✅ Complete
@@ -346,6 +379,7 @@ Phase 4 (Week 4):
 | P1-1 | ⬜ Pending | - | - | Bootstrap state management (deferred) |
 | P1-2 | ✅ Complete | 2025-01-XX | 2025-01-XX | Health monitor script created |
 | P1-3 | ⬜ Pending | - | - | Error handling improvements (partially done) |
+| P2-0 | ✅ Complete | 2025-01-XX | 2025-01-XX | Local registry image caching implemented |
 | P2-1 | ✅ Complete | 2025-01-XX | 2025-01-XX | Configuration backup with retention |
 | P2-2 | ✅ Complete | 2025-01-XX | 2025-01-XX | MetalLB IP validation implemented |
 | P2-3 | ✅ Complete | 2025-01-XX | 2025-01-XX | .env.example updated with all variables |

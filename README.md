@@ -1,6 +1,6 @@
 # Talos Kubernetes Cluster with HPA Study
 
-A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autoscaling (HPA) with advanced networking and observability.
+A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autoscaling (HPA) with advanced networking and observability. Features **local image caching** via Podman registry for faster bootstrap and offline operation.
 
 ## Quick Start
 
@@ -12,6 +12,7 @@ A Vagrant-based Talos Linux Kubernetes cluster for studying Horizontal Pod Autos
 - **talosctl** CLI for cluster management
 - **kubectl** CLI for Kubernetes management
 - **helm** for component installation
+- **podman** for local registry
 - **User in libvirt group**: `sudo usermod -aG libvirt $USER` (then log out/in)
 
 ### Step 1: Configure Environment
@@ -24,6 +25,27 @@ cp .env.example .env
 # (prevents sudo prompts during startup.sh)
 # echo "SUDO_PASSWORD=your_password" >> .env
 ```
+
+### Step 1.5: Setup Local Registry (Recommended)
+
+```bash
+# Start local Podman registry for image caching
+./scripts/start-local-registry.sh
+
+# Populate registry with all required cluster images
+./scripts/populate-local-registry.sh
+
+# Verify registry is working correctly
+./scripts/verify-local-registry.sh
+```
+
+**Benefits:**
+- Faster cluster bootstrap (images served from local cache)
+- Offline operation capability
+- Reduced external network dependency
+- Consistent image versions across deployments
+
+**Wait time:** ~10-15 minutes for initial population (subsequent runs are faster)
 
 ### Step 2: Start Cluster
 
@@ -104,6 +126,21 @@ cat talos-cluster/dashboard-admin-token.txt
 | **Kubernetes** | ✅ Ready | v1.35.2 |
 | **CNI** | 🔲 Cilium/Flannel/Calico | Configurable |
 | **metrics-server** | Optional | v0.7.1 |
+| **Local Registry** | ✅ Podman | Cached images |
+
+### Cached Images
+
+The local registry caches **38+ images** including:
+- Core Kubernetes components (kube-apiserver, kube-controller-manager, kube-scheduler, etcd, kube-proxy)
+- CNI plugins (Cilium, Flannel, Calico)
+- Service mesh (Istio, Envoy Gateway)
+- Observability (Metrics Server, Hubble, Kubernetes Dashboard)
+- Load balancing (MetalLB)
+- Certificate management (Cert-Manager)
+- Secret management (Infisical PostgreSQL)
+- Utility images (coredns, pause, cluster-proportional-autoscaler)
+
+See `docs/16-Local-Registry-Guide.md` for complete list and configuration details.
 
 ## Architecture
 
@@ -313,6 +350,7 @@ The dashboard provides web-based cluster monitoring, pod management, and resourc
 | `docs/06-HPA-Study-Guide.md` | HPA examples and exercises |
 | `docs/07-User-Session-Mode.md` | User session mode |
 | `docs/08-Kubernetes-Dashboard.md` | Dashboard setup and access |
+| `docs/16-Local-Registry-Guide.md` | Local registry setup and image caching |
 
 ## Troubleshooting
 
@@ -365,6 +403,22 @@ talosctl get members --nodes 192.168.123.10 --endpoints 192.168.123.10
 
 # Check DHCP
 virsh -c qemu:///system net-dhcp-leases cluster-net
+```
+
+### Registry Issues
+
+```bash
+# Check registry status
+podman ps | grep registry
+
+# Verify cached images
+./scripts/verify-local-registry.sh
+
+# Re-populate registry if needed
+./scripts/populate-local-registry.sh
+
+# Check Talos mirror configuration
+talosctl get machineconfig --nodes 192.168.123.10
 ```
 
 ### Sudo Prompts During Startup
