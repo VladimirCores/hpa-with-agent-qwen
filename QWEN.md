@@ -41,6 +41,19 @@ This project sets up a **Talos Linux Kubernetes cluster** using Vagrant and libv
 
 > **Note:** Calico or Flannel can be used instead of Cilium via `./scripts/k8s-components.sh --cni-calico` or `--cni-flannel`
 
+### Local Image Caching
+
+The cluster uses a **Podman-based local registry** to cache all required images:
+
+| Feature | Description |
+|---------|-------------|
+| **Cached Images** | 38+ images including Kubernetes components, CNI plugins, service mesh, and utilities |
+| **Registry Mirrors** | Configured for docker.io, registry.k8s.io, quay.io, ghcr.io, gcr.io |
+| **Benefits** | Faster bootstrap, offline operation, consistent versions |
+| **Scripts** | `start-local-registry.sh`, `populate-local-registry.sh`, `verify-local-registry.sh` |
+
+See `docs/16-Local-Registry-Guide.md` for complete details.
+
 ### Provisioning Modes
 
 | Mode                    | Description                            | Speed    | Use Case                     |
@@ -103,9 +116,10 @@ with-agent-qwen/
 cp .env.example .env
 # Edit .env to customize (optional - defaults work)
 
-# 2. Start local registry (optional but recommended)
+# 2. Start local registry (recommended for faster bootstrap)
 ./scripts/start-local-registry.sh
 ./scripts/populate-local-registry.sh
+./scripts/verify-local-registry.sh
 
 # 3. Start the cluster (full automated setup)
 ./scripts/vms-startup.sh
@@ -120,6 +134,12 @@ cp .env.example .env
 ./scripts/istio-install.sh
 ```
 
+**Note:** Step 2 (local registry) is highly recommended as it:
+- Caches 38+ images locally for faster deployment
+- Enables offline operation after initial population
+- Ensures consistent image versions across deployments
+- Configures Talos to use local registry mirrors automatically
+
 ### Script Commands
 
 | Script                         | Description                     | Options                                                                                       |
@@ -130,6 +150,9 @@ cp .env.example .env
 | `./scripts/k8s-components.sh`  | Install CNI + metrics + MetalLB | `--cni-cilium`, `--cni-calico`, `--cni-flannel`, `--with-metrics`, `--with-metallb`, `--list` |
 | `./scripts/istio-install.sh`   | Install Istio (preview)         | -                                                                                             |
 | `./scripts/prepare-network.sh` | Setup libvirt network           | -                                                                                             |
+| `./scripts/start-local-registry.sh` | Start Podman registry      | -                                                                                             |
+| `./scripts/populate-local-registry.sh` | Cache cluster images    | -                                                                                             |
+| `./scripts/verify-local-registry.sh` | Verify registry status    | -                                                                                             |
 
 ### Manual Vagrant Commands
 
@@ -289,6 +312,22 @@ vagrant plugin list | grep libvirt
 sudo usermod -aG libvirt $USER  # Then log out/in
 ```
 
+**Registry issues**
+
+```bash
+# Check registry container
+podman ps | grep registry
+
+# Verify cached images
+./scripts/verify-local-registry.sh
+
+# Re-populate if needed
+./scripts/populate-local-registry.sh
+
+# Check Talos mirror config
+talosctl get machineconfig --nodes 192.168.123.10
+```
+
 **Network issues**
 
 ```bash
@@ -390,3 +429,5 @@ mkdir -p .vagrant/raw-disks
 - [Infisical Secret Manager](https://infisical.com/)
 - [Istio Documentation](https://istio.io/)
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
+- [Podman Registry](https://docs.podman.io/)
+- [Local Registry Guide](docs/16-Local-Registry-Guide.md)
