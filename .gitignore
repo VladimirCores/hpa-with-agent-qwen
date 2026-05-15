@@ -12,6 +12,11 @@ node_modules/
 *.log
 *.tmp
 *.swp
+*.iso
+*.qcow2
+*.raw
+
+talos-cluster
 
 # Environment
 .env
@@ -21,6 +26,8 @@ node_modules/
 # Editors
 .vscode/
 .idea/
+.vagrant/
+.qwen/
 
 # Build directories
 build/
