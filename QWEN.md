@@ -26,27 +26,28 @@ This project sets up a **Talos Linux Kubernetes cluster** using Vagrant and libv
 
 ### Key Technologies
 
-| Component | Purpose |
-|-----------|---------|
-| **Talos Linux** | Immutable, minimal Kubernetes OS |
-| **Vagrant + libvirt** | VM provisioning and management |
-| **Kubernetes** | Container orchestration |
-| **Cilium CNI** (default) | eBPF-based pod networking & observability |
-| **Hubble** | Network observability (bundled with Cilium) |
-| **Infisical** | Secret manager with web dashboard |
-| **Istio + Envoy Gateway** | Service mesh and API gateway |
-| **MetalLB** | LoadBalancer Services for bare-metal clusters |
-| **metrics-server** | Resource metrics for HPA |
+| Component                 | Purpose                                       |
+| ------------------------- | --------------------------------------------- |
+| **Talos Linux**           | Immutable, minimal Kubernetes OS              |
+| **Podman Registry**       | Local image caching for faster bootstrap      |
+| **Vagrant + libvirt**     | VM provisioning and management                |
+| **Kubernetes**            | Container orchestration                       |
+| **Cilium CNI** (default)  | eBPF-based pod networking & observability     |
+| **Hubble**                | Network observability (bundled with Cilium)   |
+| **Infisical**             | Secret manager with web dashboard             |
+| **Istio + Envoy Gateway** | Service mesh and API gateway                  |
+| **MetalLB**               | LoadBalancer Services for bare-metal clusters |
+| **metrics-server**        | Resource metrics for HPA                      |
 
 > **Note:** Calico or Flannel can be used instead of Cilium via `./scripts/k8s-components.sh --cni-calico` or `--cni-flannel`
 
 ### Provisioning Modes
 
-| Mode | Description | Speed | Use Case |
-|------|-------------|-------|----------|
+| Mode                    | Description                            | Speed    | Use Case                     |
+| ----------------------- | -------------------------------------- | -------- | ---------------------------- |
 | **Raw Image** (default) | Pre-built disk image with CoW overlays | ~2-3 min | Development, rapid iteration |
-| **ISO Install** | Traditional ISO-based installation | ~5-7 min | Production-like setup |
-| **Vagrant Box** | Pre-built Vagrant box | ~2-3 min | Reusable environments |
+| **ISO Install**         | Traditional ISO-based installation     | ~5-7 min | Production-like setup        |
+| **Vagrant Box**         | Pre-built Vagrant box                  | ~2-3 min | Reusable environments        |
 
 ---
 
@@ -102,29 +103,33 @@ with-agent-qwen/
 cp .env.example .env
 # Edit .env to customize (optional - defaults work)
 
-# 2. Start the cluster (full automated setup)
+# 2. Start local registry (optional but recommended)
+./scripts/start-local-registry.sh
+./scripts/populate-local-registry.sh
+
+# 3. Start the cluster (full automated setup)
 ./scripts/vms-startup.sh
 
-# 3. Bootstrap Talos and Kubernetes
+# 4. Bootstrap Talos and Kubernetes
 ./scripts/talos-bootstrap.sh
 
-# 4. Install Kubernetes components (CNI + metrics-server)
+# 5. Install Kubernetes components (CNI + metrics-server)
 ./scripts/k8s-components.sh
 
-# 5. (Optional) Install Istio with Envoy Gateway
+# 6. (Optional) Install Istio with Envoy Gateway
 ./scripts/istio-install.sh
 ```
 
 ### Script Commands
 
-| Script | Description | Options |
-|--------|-------------|---------|
-| `./scripts/vms-startup.sh` | Start all VMs | `-s` skip cleanup, `-f` force reset, `-v` verbose |
-| `./scripts/vms-cleanup.sh` | Stop and remove VMs | `-n` preserve network |
-| `./scripts/talos-bootstrap.sh` | Bootstrap Talos cluster | `-n <name>` cluster name, `--no-merge` kubeconfig |
-| `./scripts/k8s-components.sh` | Install CNI + metrics + MetalLB | `--cni-cilium`, `--cni-calico`, `--cni-flannel`, `--with-metrics`, `--with-metallb`, `--list` |
-| `./scripts/istio-install.sh` | Install Istio (preview) | - |
-| `./scripts/prepare-network.sh` | Setup libvirt network | - |
+| Script                         | Description                     | Options                                                                                       |
+| ------------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `./scripts/vms-startup.sh`     | Start all VMs                   | `-s` skip cleanup, `-f` force reset, `-v` verbose                                             |
+| `./scripts/vms-cleanup.sh`     | Stop and remove VMs             | `-n` preserve network                                                                         |
+| `./scripts/talos-bootstrap.sh` | Bootstrap Talos cluster         | `-n <name>` cluster name, `--no-merge` kubeconfig                                             |
+| `./scripts/k8s-components.sh`  | Install CNI + metrics + MetalLB | `--cni-cilium`, `--cni-calico`, `--cni-flannel`, `--with-metrics`, `--with-metallb`, `--list` |
+| `./scripts/istio-install.sh`   | Install Istio (preview)         | -                                                                                             |
+| `./scripts/prepare-network.sh` | Setup libvirt network           | -                                                                                             |
 
 ### Manual Vagrant Commands
 
@@ -169,36 +174,36 @@ kubectl get pods -A
 
 ### Environment Variables (.env)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NETWORK_NAME` | cluster-net | libvirt network name |
-| `MASTER_NAME` | talos-master | Master node name |
-| `MASTER_IP` | 192.168.123.10 | Master node IP |
-| `MASTER_CPUS` | 4 | Master CPU count |
-| `MASTER_MEMORY` | 6144 | Master memory (MB) |
-| `WORKER_COUNT` | 2 | Number of workers |
-| `WORKER_IP_BASE` | 192.168.123.20 | First worker IP |
-| `WORKER_CPUS` | 1 | Worker CPU count |
-| `WORKER_MEMORY` | 2048 | Worker memory (MB) |
-| `CLUSTER_NAME` | talos-cluster | Cluster identifier |
-| `MAC_PREFIX` | 52:54:00:00:00 | MAC address prefix |
-| `USE_RAW_IMAGE` | true | Use raw disk image (recommended) |
-| `USE_BOX` | false | Use pre-built Vagrant box |
+| Variable         | Default        | Description                      |
+| ---------------- | -------------- | -------------------------------- |
+| `NETWORK_NAME`   | cluster-net    | libvirt network name             |
+| `MASTER_NAME`    | talos-master   | Master node name                 |
+| `MASTER_IP`      | 192.168.123.10 | Master node IP                   |
+| `MASTER_CPUS`    | 4              | Master CPU count                 |
+| `MASTER_MEMORY`  | 6144           | Master memory (MB)               |
+| `WORKER_COUNT`   | 2              | Number of workers                |
+| `WORKER_IP_BASE` | 192.168.123.20 | First worker IP                  |
+| `WORKER_CPUS`    | 1              | Worker CPU count                 |
+| `WORKER_MEMORY`  | 2048           | Worker memory (MB)               |
+| `CLUSTER_NAME`   | talos-cluster  | Cluster identifier               |
+| `MAC_PREFIX`     | 52:54:00:00:00 | MAC address prefix               |
+| `USE_RAW_IMAGE`  | true           | Use raw disk image (recommended) |
+| `USE_BOX`        | false          | Use pre-built Vagrant box        |
 
 ### Network Configuration
 
-| Setting | Value |
-|---------|-------|
-| Network CIDR | 192.168.123.0/24 |
-| Gateway | 192.168.123.1 |
-| DHCP Range | 192.168.123.2 - 192.168.123.254 |
-| Forward Mode | NAT |
+| Setting      | Value                           |
+| ------------ | ------------------------------- |
+| Network CIDR | 192.168.123.0/24                |
+| Gateway      | 192.168.123.1                   |
+| DHCP Range   | 192.168.123.2 - 192.168.123.254 |
+| Forward Mode | NAT                             |
 
 ### Static IP Reservations
 
-| Node | IP | MAC |
-|------|-----|-----|
-| talos-master | 192.168.123.10 | `${MAC_PREFIX}:01` |
+| Node           | IP             | MAC                |
+| -------------- | -------------- | ------------------ |
+| talos-master   | 192.168.123.10 | `${MAC_PREFIX}:01` |
 | talos-worker-1 | 192.168.123.20 | `${MAC_PREFIX}:0b` |
 | talos-worker-2 | 192.168.123.21 | `${MAC_PREFIX}:0c` |
 
@@ -253,6 +258,7 @@ set +a
 ### Common Issues
 
 **Bootstrap fails with existing Talos state (Raw Image mode)**
+
 ```bash
 # Bootstrap script auto-detects and resets if needed
 ./scripts/talos-bootstrap.sh
@@ -262,6 +268,7 @@ talosctl reset --nodes 192.168.123.10 --graceful=false
 ```
 
 **Bootstrap fails with certificate errors (ISO mode, Talos v1.12.x)**
+
 ```bash
 # Talos v1.12.x requires empty disks for maintenance mode
 ./scripts/vms-cleanup.sh  # Full cleanup (wipes disks)
@@ -270,6 +277,7 @@ talosctl reset --nodes 192.168.123.10 --graceful=false
 ```
 
 **VMs fail to start**
+
 ```bash
 # Check libvirtd
 systemctl status libvirtd
@@ -282,6 +290,7 @@ sudo usermod -aG libvirt $USER  # Then log out/in
 ```
 
 **Network issues**
+
 ```bash
 # Recreate network
 ./scripts/prepare-network.sh
@@ -291,12 +300,14 @@ virsh -c qemu:///system net-dhcp-leases cluster-net
 ```
 
 **kubectl cannot connect**
+
 ```bash
 # Regenerate kubeconfig
 talosctl kubeconfig . --nodes 192.168.123.10 --force
 ```
 
 **Raw image overlays not created**
+
 ```bash
 # Ensure qemu-img is installed
 qemu-img --version
@@ -313,43 +324,50 @@ mkdir -p .vagrant/raw-disks
 ## Next Steps for HPA Study
 
 1. **Install Kubernetes components (Cilium + metrics-server):**
+
    ```bash
    ./scripts/k8s-components.sh
    ```
 
 2. **Install MetalLB LoadBalancer (optional - for external Services):**
+
    ```bash
    ./scripts/k8s-components.sh --with-metallb
    # Or install everything: --with-metrics --with-metallb
-   
+
    # Verify MetalLB
    kubectl get pods -n metallb-system
    kubectl get ipaddresspools.metallb.io -n metallb-system
    ```
 
 3. **Install Infisical Secret Manager (optional - for secret management):**
+
    ```bash
    ./scripts/infisical-install.sh
    # Access dashboard: kubectl port-forward svc/infisical-ui -n infisical 8081:80
    ```
 
 4. **Deploy sample application:**
+
    ```bash
    kubectl apply -f docs/examples/sample-app.yaml
    ```
 
 5. **Configure HPA:**
+
    ```bash
    kubectl autoscale deployment sample-app --cpu-percent=50 --min=1 --max=10
    ```
 
 6. **Generate load and observe scaling:**
+
    ```bash
    kubectl run -i --tty load-generator --image=busybox --restart=Never -- \
      /bin/sh -c "while true; do wget -q -O- http://sample-app; done"
    ```
 
 7. **Monitor with Hubble (Cilium observability):**
+
    ```bash
    kubectl port-forward -n kube-system svc/hubble-ui 8080:80
    # Then open http://localhost:8080

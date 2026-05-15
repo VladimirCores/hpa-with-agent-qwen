@@ -91,24 +91,41 @@ if grep -q "disk: /dev/vda" "$CONFIG_DIR/worker.yaml"; then
 fi
 
 # Add registry mirror configuration for local image caching
-# Routes ghcr.io pulls through the local Docker registry on the host gateway
+# Routes pulls through the local Docker registry on the host gateway
 # Determine the full Talos version (e.g. v1.13 → v1.13.0)
 INSTALLER_VERSION="${TALOS_VERSION}.0"
 echo "  Installer image version: $INSTALLER_VERSION"
 
 echo ""
-echo "  Adding registry mirror: ghcr.io → http://${NETWORK_IP}:5000..."
+echo "  Adding registry mirrors to local registry at http://${NETWORK_IP}:5000..."
+REGISTRIES=("docker.io" "registry.k8s.io" "quay.io" "ghcr.io" "gcr.io")
+
 for config_file in "$CONFIG_DIR/controlplane.yaml" "$CONFIG_DIR/worker.yaml"; do
+    # Add mirrors for each registry
+    for reg in "${REGISTRIES[@]}"; do
+        yq -i eval '
+            select(.kind == null) |
+            .machine.registries.mirrors."'"${reg}"'".endpoints += ["http://'"${NETWORK_IP}"':5000"]
+        ' "$config_file" 2>/dev/null
+    done
+
+    # Configure insecure access for the local registry
     yq -i eval '
         select(.kind == null) |
-        .machine.registries.mirrors."ghcr.io".endpoints += ["http://'"${NETWORK_IP}"':5000"] |
-        .machine.registries.config."'"${NETWORK_IP}"':5000".tls.insecureSkipVerify = true |
+        .machine.registries.config."'"${NETWORK_IP}"':5000".tls.insecureSkipVerify = true
+    ' "$config_file" 2>/dev/null
+
+    # Use local registry for installer image if possible (requires manual pull/push to local registry)
+    # For now, we point it to the local registry endpoint, but it might fail if the image is not there.
+    # Users should pre-pull images: podman pull ghcr.io/siderolabs/installer:$VERSION && podman push ...
+    yq -i eval '
+        select(.kind == null) |
         .machine.install.image = "http://'"${NETWORK_IP}"':5000/siderolabs/installer:'"${INSTALLER_VERSION}"'"
     ' "$config_file" 2>/dev/null || {
         echo "  WARNING: Failed to add registry mirror to $config_file (yq failed, skipping)"
     }
 done
-echo "  ✓ Registry mirror configured"
+echo "  ✓ Registry mirrors configured for: ${REGISTRIES[*]}"
 
 # Extract certificates for reference (non-critical, skip if fails)
 # Disable strict error handling for this optional step

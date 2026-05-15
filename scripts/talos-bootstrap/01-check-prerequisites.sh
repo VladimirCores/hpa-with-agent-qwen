@@ -30,6 +30,14 @@ else
     KUBECTL_AVAILABLE=true
 fi
 
+# Check yq
+if ! command -v yq &>/dev/null; then
+    echo "ERROR: yq not found"
+    echo "  Install: sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && sudo chmod +x /usr/local/bin/yq"
+    exit 1
+fi
+echo "  ✓ yq: $(yq --version 2>/dev/null || echo 'installed')"
+
 # Check VMs are running
 echo "  Checking VMs..."
 VM_COUNT=0
@@ -171,6 +179,16 @@ if [[ "$NETWORK_STATE" != "yes" ]]; then
     exit 1
 fi
 echo "  ✓ Libvirt network '$NETWORK_NAME' is active"
+
+# Check local registry
+echo "  Checking local registry..."
+if ! podman ps -q -f name="local-registry" | grep -q .; then
+    echo "  ✗ Local registry is not running"
+    echo "    Remediation:"
+    echo "      - Run: ./scripts/start-local-registry.sh"
+    exit 1
+fi
+echo "  ✓ Local registry is running"
 
 echo ""
 echo "  ✓ All prerequisites met"
