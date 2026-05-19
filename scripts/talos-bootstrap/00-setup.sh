@@ -48,3 +48,6 @@ export TALOS_VERSION
 export CONFIG_DIR
 export CERTS_DIR
 export SECRETS_FILE
+
+# Set TALOSCONFIG environment variable for talosctl commands
+export TALOSCONFIG="$CONFIG_DIR/talosconfig"

@@ -15,6 +15,10 @@ This happened because the **bootstrap script was applying configuration and rebo
    - **Maintenance mode** (no certs, use `--insecure` flag), OR
    - Matching certificates between client and server
 
+**Additional Issue:** The `--insecure` flag was being used incorrectly. In Talos v1.13+, the bootstrap command needs both:
+- The `--insecure` flag to accept self-signed maintenance mode certificates
+- The correct `TALOSCONFIG` path set via environment variable or `--talosconfig` flag
+
 ## Correct Talos Bootstrap Order
 
 ### Phase 1: Preparation (Before VM Boot)
@@ -62,8 +66,9 @@ The updated `05-bootstrap-cluster.sh` now:
 
 1. **Checks node state properly** - Detects if node is in maintenance mode vs. has certs
 2. **Uses --insecure for bootstrap** - Bootstrap always uses insecure mode
-3. **No premature reboots** - Removed reboot before bootstrap
-4. **Better error handling** - Clear troubleshooting steps
+3. **Sets TALOSCONFIG environment variable** - Ensures talosctl uses the correct config file
+4. **No premature reboots** - Removed reboot before bootstrap
+5. **Better error handling** - Clear troubleshooting steps
 
 ## Manual Recovery Steps
 

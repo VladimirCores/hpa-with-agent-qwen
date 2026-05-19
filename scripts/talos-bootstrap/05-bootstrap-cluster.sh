@@ -140,16 +140,18 @@ if check_if_bootstrapped "$MASTER_IP"; then
     echo ""
     echo "  Verifying cluster health..."
 else
-    # Perform bootstrap using insecure mode (node is in maintenance mode)
+    # Perform bootstrap using maintenance mode
+    # In Talos v1.13+, maintenance mode uses self-signed certs that talosctl can auto-accept
     echo "  Bootstrapping cluster on $MASTER_NAME ($MASTER_IP)..."
-    echo "  Using insecure mode (maintenance mode)..."
+    echo "  Node is in maintenance mode..."
     
     BOOTSTRAP_SUCCESS=false
     for attempt in 1 2 3 4 5; do
         echo "  Bootstrap attempt $attempt..."
         
-        # Use --insecure flag since we're in maintenance mode
-        if talosctl bootstrap --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure 2>&1; then
+        # In maintenance mode, talosctl will auto-accept the self-signed certificate
+        # Use --insecure flag to accept self-signed certs during bootstrap
+        if TALOSCONFIG="$CONFIG_DIR/talosconfig" talosctl bootstrap --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure 2>&1; then
             echo "  ✓ Kubernetes cluster bootstrapped"
             BOOTSTRAP_SUCCESS=true
             break
