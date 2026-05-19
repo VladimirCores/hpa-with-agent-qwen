@@ -19,72 +19,146 @@ if [[ ! -f "$CONFIG_DIR/talosconfig" ]]; then
     exit 1
 fi
 
-# Check if node is in maintenance mode
-# Talos 1.13+: try secure connection with talosconfig
-# - TLS error ("certificate signed by unknown authority") → maintenance mode (or stale PKI)
-# - Success with version info → cluster mode, PKI matches
-echo "  Checking node maintenance mode..."
-
-SECURE_OUTPUT=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-
-if echo "$SECURE_OUTPUT" | grep -q "certificate signed by unknown authority"; then
-    echo "  ✓ Node is in maintenance mode (Talos v1.13+)"
-    echo "  Applying config before bootstrap..."
-    if ! talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1; then
-        echo "  ERROR: Failed to apply machine configuration"
-        echo "  The node may be running an incompatible Talos version"
-        echo "  Check that TALOS_VERSION matches the VM's Talos version"
-        exit 1
-    fi
-    echo "  Rebooting node to reload containerd with registry mirrors..."
-    talosctl reboot --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" --wait=false 2>&1 || true
-    sleep 5
-    echo "  Waiting for node to reboot after config apply..."
-    sleep 10
-    # Fix endpoints in talosconfig
-    sed -i 's/endpoints: \[]/endpoints: ['$MASTER_IP']/g' "$CONFIG_DIR/talosconfig" 2>/dev/null || true
-    # Wait for node to come back up with new PKI
-    echo "  Waiting for node to come back online..."
-    for i in $(seq 1 40); do
-        local_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-        if echo "$local_output" | grep -q "Server:" && ! echo "$local_output" | grep -q "certificate signed by unknown authority"; then
-            echo "  ✓ Node is back online (${i}s)"
-            break
-        fi
-        if [[ $((i % 10)) -eq 0 ]]; then
-            echo "  ... waiting for node (${i}s)"
-        fi
-        sleep 3
-    done
-elif echo "$SECURE_OUTPUT" | grep -q "Tag:" && echo "$SECURE_OUTPUT" | grep -q "Server:"; then
-    echo "  ✓ Node is in cluster mode (already configured)"
-    echo "  Checking if cluster is already bootstrapped..."
-
-    # Wait for node to be fully ready after reboot
-    echo "  Waiting for node to be fully initialized..."
-    for i in $(seq 1 20); do
-        if talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Member"; then
-            echo "  ✓ Node is fully initialized (${i}s)"
-            break
-        fi
-        if [[ $((i % 5)) -eq 0 ]]; then
-            echo "  ... waiting for cluster membership (${i}s)"
-        fi
-        sleep 3
-    done
-
-    # Check if cluster is already bootstrapped
-    if talosctl get members --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Member"; then
-        echo "  ✓ Cluster is already bootstrapped"
-        echo "  Skipping bootstrap, continuing to apply configs..."
+# Function to reset node to maintenance mode
+reset_to_maintenance() {
+    local node_ip="$1"
+    echo "  Resetting node $node_ip to maintenance mode..."
+    
+    # Try graceful reset first
+    if talosctl reset --nodes "$node_ip" --endpoints "$node_ip" --insecure --graceful=false --wait=false 2>&1; then
+        echo "  ✓ Reset command sent successfully"
+        echo "  Waiting for node to enter maintenance mode..."
+        sleep 15
+        
+        # Wait for node to be accessible in maintenance mode
+        for i in $(seq 1 30); do
+            local reset_check=$(talosctl version --nodes "$node_ip" --endpoints "$node_ip" --insecure 2>&1 || true)
+            if echo "$reset_check" | grep -q "Tag:"; then
+                echo "  ✓ Node is in maintenance mode (${i}s)"
+                return 0
+            fi
+            if [[ $((i % 5)) -eq 0 ]]; then
+                echo "  ... waiting for reset (${i}s)"
+            fi
+            sleep 3
+        done
+        echo "  WARNING: Node may not have fully reset"
+        return 1
     else
-        echo "  WARNING: Cluster members not accessible"
-        echo "  Attempting bootstrap anyway..."
+        echo "  ERROR: Failed to reset node"
+        return 1
     fi
-else
-    echo "  WARNING: Unexpected response from node"
-    echo "  Response: $(echo "$SECURE_OUTPUT" | head -5)"
-    echo "  Proceeding anyway..."
+}
+
+# Function to check node state and ensure proper configuration
+ensure_node_configured() {
+    local node_ip="$1"
+    local node_type="$2"
+    local config_file="$3"
+    
+    echo "  Checking node $node_ip ($node_type) state..."
+    
+    # Try secure connection first
+    SECURE_OUTPUT=$(talosctl version --nodes "$node_ip" --endpoints "$node_ip" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+    
+    if echo "$SECURE_OUTPUT" | grep -q "certificate signed by unknown authority"; then
+        echo "  ✓ Node is in maintenance mode (Talos v1.13+)"
+        echo "  Applying config before bootstrap..."
+        
+        if ! talosctl apply-config --nodes "$node_ip" --endpoints "$node_ip" --insecure --file "$config_file" 2>&1; then
+            echo "  ERROR: Failed to apply machine configuration"
+            echo "  Attempting to reset node to maintenance mode..."
+            
+            if reset_to_maintenance "$node_ip"; then
+                echo "  Retrying config apply after reset..."
+                if ! talosctl apply-config --nodes "$node_ip" --endpoints "$node_ip" --insecure --file "$config_file" 2>&1; then
+                    echo "  ERROR: Config apply failed even after reset"
+                    return 1
+                fi
+            else
+                echo "  ERROR: Could not reset node"
+                return 1
+            fi
+        fi
+        
+        echo "  Rebooting node to reload containerd with registry mirrors..."
+        talosctl reboot --nodes "$node_ip" --endpoints "$node_ip" --talosconfig "$CONFIG_DIR/talosconfig" --wait=false 2>&1 || true
+        sleep 5
+        echo "  Waiting for node to reboot after config apply..."
+        sleep 10
+        
+        # Fix endpoints in talosconfig
+        sed -i 's/endpoints: \[\]/endpoints: ['"$node_ip"']/g' "$CONFIG_DIR/talosconfig" 2>/dev/null || true
+        
+        # Wait for node to come back up with new PKI
+        echo "  Waiting for node to come back online..."
+        for i in $(seq 1 40); do
+            local_output=$(talosctl version --nodes "$node_ip" --endpoints "$node_ip" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+            if echo "$local_output" | grep -q "Server:" && ! echo "$local_output" | grep -q "certificate signed by unknown authority"; then
+                echo "  ✓ Node is back online (${i}s)"
+                return 0
+            fi
+            if [[ $((i % 10)) -eq 0 ]]; then
+                echo "  ... waiting for node (${i}s)"
+            fi
+            sleep 3
+        done
+        echo "  WARNING: Node may not be fully online yet"
+        return 0
+        
+    elif echo "$SECURE_OUTPUT" | grep -q "Tag:" && echo "$SECURE_OUTPUT" | grep -q "Server:"; then
+        echo "  ✓ Node is in cluster mode (already configured)"
+        return 0
+        
+    else
+        echo "  WARNING: Unexpected response from node"
+        echo "  Response: $(echo "$SECURE_OUTPUT" | head -5)"
+        echo "  Attempting to reset node and apply configuration..."
+        
+        # For unexpected responses, reset and apply config
+        if reset_to_maintenance "$node_ip"; then
+            echo "  Applying config after reset..."
+            if talosctl apply-config --nodes "$node_ip" --endpoints "$node_ip" --insecure --file "$config_file" 2>&1; then
+                echo "  ✓ Config applied successfully after reset"
+                
+                echo "  Rebooting node..."
+                talosctl reboot --nodes "$node_ip" --endpoints "$node_ip" --talosconfig "$CONFIG_DIR/talosconfig" --wait=false 2>&1 || true
+                sleep 5
+                sleep 10
+                
+                # Fix endpoints in talosconfig
+                sed -i 's/endpoints: \[\]/endpoints: ['"$node_ip"']/g' "$CONFIG_DIR/talosconfig" 2>/dev/null || true
+                
+                echo "  Waiting for node to come back online..."
+                for i in $(seq 1 40); do
+                    local_output=$(talosctl version --nodes "$node_ip" --endpoints "$node_ip" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+                    if echo "$local_output" | grep -q "Server:" && ! echo "$local_output" | grep -q "certificate signed by unknown authority"; then
+                        echo "  ✓ Node is back online (${i}s)"
+                        return 0
+                    fi
+                    if [[ $((i % 10)) -eq 0 ]]; then
+                        echo "  ... waiting for node (${i}s)"
+                    fi
+                    sleep 3
+                done
+                return 0
+            else
+                echo "  ERROR: Failed to apply config after reset"
+                return 1
+            fi
+        else
+            echo "  ERROR: Failed to reset node"
+            return 1
+        fi
+    fi
+}
+
+# Check if node is in maintenance mode and ensure proper configuration
+echo "  Checking node maintenance mode..."
+if ! ensure_node_configured "$MASTER_IP" "controlplane" "$CONFIG_DIR/controlplane.yaml"; then
+    echo "  ERROR: Failed to configure master node"
+    echo "  Manual intervention may be required"
+    exit 1
 fi
 
 # Perform bootstrap
@@ -131,9 +205,67 @@ if [[ "$BOOTSTRAP_SUCCESS" != "true" ]]; then
         echo "  ✓ Cluster is already bootstrapped"
         echo "  Skipping bootstrap, continuing to apply configs..."
     else
-        echo "  WARNING: Bootstrap failed and cluster membership not detected"
-        echo "  This may be normal if node is still initializing"
-        echo "  Continuing to apply configs anyway..."
+        echo "  ERROR: Bootstrap failed and cluster membership not detected"
+        echo "  This indicates a critical failure in the bootstrap process"
+        echo ""
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo "  DIAGNOSTIC INFORMATION"
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo ""
+        echo "  Last talosctl get members output:"
+        echo "  $check_output"
+        echo ""
+
+        # Check node version/state
+        echo "  Checking node state..."
+        version_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+        echo "  Node version response:"
+        echo "  $version_output"
+        echo ""
+
+        # Check if node is reachable
+        echo "  Testing connectivity..."
+        ping_result=$(ping -c 2 "$MASTER_IP" 2>&1 | tail -2 || true)
+        echo "  Ping result: $ping_result"
+        echo ""
+
+        # Check machine config status
+        echo "  Checking machine configuration..."
+        config_output=$(talosctl get machineconfig --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+        echo "  Machine config response:"
+        echo "  $config_output"
+        echo ""
+
+        # Check services status
+        echo "  Checking critical services..."
+        services_output=$(talosctl services --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -E "(etcd|trustd|machined)" || true)
+        echo "  Critical services status:"
+        echo "  $services_output"
+        echo ""
+
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo "  COMMON CAUSES AND SOLUTIONS"
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo ""
+        echo "  1. VM booted from ISO instead of hard disk:"
+        echo "     - Check VM boot order (disk should be first, CDROM second)"
+        echo "     - Verify VM is not stuck in maintenance mode"
+        echo ""
+        echo "  2. Network connectivity issues:"
+        echo "     - Verify MASTER_IP ($MASTER_IP) is correct"
+        echo "     - Check firewall rules allow Talos ports (50000, 50001)"
+        echo ""
+        echo "  3. Configuration problems:"
+        echo "     - Ensure controlplane.yaml was generated correctly"
+        echo "     - Check if apply-config succeeded before bootstrap"
+        echo ""
+        echo "  4. Insufficient resources:"
+        echo "     - Verify VM has enough CPU/RAM for Talos + Kubernetes"
+        echo "     - Minimum: 2 CPU, 2GB RAM for control plane"
+        echo ""
+        echo "  Manual intervention required"
+        echo "  Review logs above and check VM console output"
+        exit 1
     fi
 fi
 

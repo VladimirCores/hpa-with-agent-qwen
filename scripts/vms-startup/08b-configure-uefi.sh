@@ -9,7 +9,7 @@
 # 1. Checks if VMs have UEFI loader configured
 # 2. If not, stops VMs and reconfigures with UEFI
 # 3. Adds NVRAM storage for UEFI variables
-# 4. Configures boot order (CDROM first, then disk)
+# 4. Configures boot order (disk first, then CDROM as fallback)
 # 5. Restarts VMs with UEFI enabled
 # =============================================================================
 
@@ -91,7 +91,7 @@ configure_uefi() {
     local temp_xml=$(mktemp)
     
     if [[ "$use_iso" == "true" ]]; then
-        # ISO mode: boot from CDROM first, then disk
+        # ISO mode: boot from disk first (installation already done), CDROM as fallback
         cat > "$temp_xml" << VMXML
 <domain type="kvm">
   <name>$vm_name</name>
@@ -111,14 +111,14 @@ configure_uefi() {
       <driver name="qemu" type="raw"/>
       <source file="$ISO_PATH"/>
       <target dev="hda" bus="ide"/>
-      <boot order="1"/>
+      <boot order="2"/>
       <readonly/>
     </disk>
     <disk type="file" device="disk">
       <driver name="qemu" type="qcow2" cache="none"/>
       <source file="$disk_path"/>
       <target dev="vda" bus="virtio"/>
-      <boot order="2"/>
+      <boot order="1"/>
     </disk>
     <interface type="network">
       <source network="$NETWORK_NAME"/>
@@ -185,10 +185,11 @@ RECONFIGURED=0
 UEFI_ALREADY=0
 
 # Determine boot mode (ISO or raw image)
+# IMPORTANT: After Talos installation, VMs should always boot from disk first
 USE_ISO="false"
 if [[ "${USE_RAW_IMAGE:-false}" != "true" ]]; then
     USE_ISO="true"
-    echo "  Boot mode: ISO installation"
+    echo "  Boot mode: ISO installation (disk boot after install)"
 else
     echo "  Boot mode: Raw disk image"
 fi
