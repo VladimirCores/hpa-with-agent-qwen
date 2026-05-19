@@ -122,8 +122,10 @@ apply_worker_config() {
     fi
 }
 
-# Apply controlplane config
+# Apply controlplane config (after bootstrap, node should have certs)
 echo "  Applying controlplane config to $MASTER_NAME ($MASTER_IP)..."
+
+# After bootstrap, the node has certificates - use talosconfig
 if talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --file "$CONFIG_DIR/controlplane.yaml" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1; then
     echo "  ✓ Controlplane config applied"
 else
