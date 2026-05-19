@@ -207,7 +207,64 @@ if [[ "$BOOTSTRAP_SUCCESS" != "true" ]]; then
     else
         echo "  ERROR: Bootstrap failed and cluster membership not detected"
         echo "  This indicates a critical failure in the bootstrap process"
+        echo ""
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo "  DIAGNOSTIC INFORMATION"
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo ""
+        echo "  Last talosctl get members output:"
+        echo "  $check_output"
+        echo ""
+
+        # Check node version/state
+        echo "  Checking node state..."
+        version_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+        echo "  Node version response:"
+        echo "  $version_output"
+        echo ""
+
+        # Check if node is reachable
+        echo "  Testing connectivity..."
+        ping_result=$(ping -c 2 "$MASTER_IP" 2>&1 | tail -2 || true)
+        echo "  Ping result: $ping_result"
+        echo ""
+
+        # Check machine config status
+        echo "  Checking machine configuration..."
+        config_output=$(talosctl get machineconfig --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+        echo "  Machine config response:"
+        echo "  $config_output"
+        echo ""
+
+        # Check services status
+        echo "  Checking critical services..."
+        services_output=$(talosctl services --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -E "(etcd|trustd|machined)" || true)
+        echo "  Critical services status:"
+        echo "  $services_output"
+        echo ""
+
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo "  COMMON CAUSES AND SOLUTIONS"
+        echo "  ═══════════════════════════════════════════════════════════"
+        echo ""
+        echo "  1. VM booted from ISO instead of hard disk:"
+        echo "     - Check VM boot order (disk should be first, CDROM second)"
+        echo "     - Verify VM is not stuck in maintenance mode"
+        echo ""
+        echo "  2. Network connectivity issues:"
+        echo "     - Verify MASTER_IP ($MASTER_IP) is correct"
+        echo "     - Check firewall rules allow Talos ports (50000, 50001)"
+        echo ""
+        echo "  3. Configuration problems:"
+        echo "     - Ensure controlplane.yaml was generated correctly"
+        echo "     - Check if apply-config succeeded before bootstrap"
+        echo ""
+        echo "  4. Insufficient resources:"
+        echo "     - Verify VM has enough CPU/RAM for Talos + Kubernetes"
+        echo "     - Minimum: 2 CPU, 2GB RAM for control plane"
+        echo ""
         echo "  Manual intervention required"
+        echo "  Review logs above and check VM console output"
         exit 1
     fi
 fi
