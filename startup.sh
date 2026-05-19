@@ -3,10 +3,11 @@
 # Unified Talos Cluster Startup Script
 # =============================================================================
 # This script orchestrates the entire cluster lifecycle:
-# 1. Local Registry setup & population
-# 2. VM Provisioning (vms-startup.sh)
-# 3. Talos Bootstrap (talos-bootstrap.sh)
-# 4. K8s Components (k8s-components.sh)
+# 1. Full Cleanup (remove orphaned libvirt resources)
+# 2. Local Registry setup & population
+# 3. VM Provisioning (vms-startup.sh)
+# 4. Talos Bootstrap (talos-bootstrap.sh)
+# 5. K8s Components (k8s-components.sh)
 # =============================================================================
 
 set -euo pipefail
@@ -36,6 +37,7 @@ SKIP_VMS=false
 SKIP_BOOTSTRAP=false
 SKIP_COMPONENTS=false
 FORCE_RESET=false
+SKIP_CLEANUP=false
 
 usage() {
     echo "Usage: $0 [options]"
@@ -43,6 +45,7 @@ usage() {
     echo "  --skip-vms         Skip VM provisioning"
     echo "  --skip-bootstrap   Skip Talos cluster bootstrap"
     echo "  --skip-components  Skip K8s components installation (CNI, etc.)"
+    echo "  --skip-cleanup     Skip orphaned resource cleanup"
     echo "  -f, --force-reset  Force reset (destroy VMs and disks, fresh start)"
     echo "  -h, --help         Show this help message"
     exit 1
@@ -54,6 +57,7 @@ while [[ $# -gt 0 ]]; do
         --skip-vms)        SKIP_VMS=true; shift ;;
         --skip-bootstrap)  SKIP_BOOTSTRAP=true; shift ;;
         --skip-components) SKIP_COMPONENTS=true; shift ;;
+        --skip-cleanup)    SKIP_CLEANUP=true; shift ;;
         -f|--force-reset)  FORCE_RESET=true; shift ;;
         -h|--help)         usage ;;
         *)                 echo "Unknown option: $1"; usage ;;
@@ -67,6 +71,109 @@ print_header() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo ""
 }
+
+# =============================================================================
+# Phase 0: Full Cleanup (Remove Orphaned Libvirt Resources)
+# =============================================================================
+if [[ "$SKIP_CLEANUP" != "true" ]]; then
+    print_header "Phase 0: Cleanup Orphaned Libvirt Resources"
+
+    # VM name prefix (derived from project directory name, used by vagrant-libvirt)
+    VM_PREFIX="$(basename "$PROJECT_ROOT")_"
+    
+    # Expected VM names
+    EXPECTED_VMS=("$MASTER_NAME")
+    for i in $(seq 1 "$WORKER_COUNT"); do
+        EXPECTED_VMS+=("${WORKER_NAME_PREFIX}${i}")
+    done
+
+    echo "Scanning for orphaned VMs in libvirt..."
+    echo "  Expected VMs: ${EXPECTED_VMS[*]}"
+    echo "  VM Prefix: $VM_PREFIX"
+    echo ""
+
+    # Find and remove VMs that don't match expected names
+    virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | tail -n +3 | while read -r vm_name rest; do
+        [[ -z "$vm_name" ]] && continue
+        
+        # Check if this VM belongs to our project (starts with VM_PREFIX)
+        if [[ "$vm_name" == ${VM_PREFIX}* ]]; then
+            # Extract the base name (without prefix)
+            base_name="${vm_name#${VM_PREFIX}}"
+            
+            # Check if this is an expected VM
+            is_expected=false
+            for expected in "${EXPECTED_VMS[@]}"; do
+                if [[ "$base_name" == "$expected" ]]; then
+                    is_expected=true
+                    break
+                fi
+            done
+            
+            # If not expected, it's orphaned - remove it
+            if [[ "$is_expected" == "false" ]]; then
+                echo "  Found orphaned VM: $vm_name - removing..."
+                vm_state=$(virsh -c "$LIBVIRT_URI" domstate "$vm_name" 2>/dev/null || echo "unknown")
+                if [[ "$vm_state" == "running" ]]; then
+                    virsh -c "$LIBVIRT_URI" destroy "$vm_name" 2>/dev/null || true
+                fi
+                virsh -c "$LIBVIRT_URI" undefine "$vm_name" --remove-all-storage 2>/dev/null || \
+                    virsh -c "$LIBVIRT_URI" undefine "$vm_name" 2>/dev/null || true
+                echo "    ✓ Removed orphaned VM: $vm_name"
+            else
+                echo "  Keeping expected VM: $vm_name"
+            fi
+        fi
+    done
+
+    echo ""
+    echo "Cleaning up orphaned volumes..."
+    STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
+    
+    # List all volumes and remove those not belonging to expected VMs
+    virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | while read -r vol rest; do
+        [[ -z "$vol" ]] && continue
+        
+        # Check if volume belongs to expected VMs or is the ISO
+        is_expected=false
+        if [[ "$vol" == *"talos-metal-amd64"* ]] || [[ "$vol" == *"metal-amd64.iso"* ]]; then
+            is_expected=true
+        fi
+        
+        for expected in "${EXPECTED_VMS[@]}"; do
+            if [[ "$vol" == *"${VM_PREFIX}${expected}"* ]]; then
+                is_expected=true
+                break
+            fi
+        done
+        
+        if [[ "$is_expected" == "false" ]]; then
+            echo "  Removing orphaned volume: $vol"
+            virsh -c "$LIBVIRT_URI" vol-delete --pool "$STORAGE_POOL" "$vol" 2>/dev/null && \
+                echo "    ✓ Removed" || echo "    ✗ Failed"
+        fi
+    done
+
+    echo ""
+    echo "Checking for orphaned networks..."
+    # Check if network exists but has no connected VMs
+    if virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" &>/dev/null; then
+        active_vms=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -c "^[[:space:]]" || echo "0")
+        if [[ "$active_vms" -eq 0 ]]; then
+            echo "  Network '$NETWORK_NAME' exists but has no active VMs"
+            echo "  Preserving network for reuse"
+        else
+            echo "  Network '$NETWORK_NAME' is active with $active_vms VM(s)"
+        fi
+    else
+        echo "  Network '$NETWORK_NAME' does not exist"
+    fi
+
+    echo ""
+    echo -e "${GREEN}✓ Orphaned resource cleanup complete${NC}"
+else
+    echo -e "${YELLOW}Phase 0: Skipping Orphaned Resource Cleanup${NC}"
+fi
 
 # =============================================================================
 # Phase 1: Local Registry
@@ -139,6 +246,7 @@ print_header "All Systems Operational"
 echo -e "${GREEN}Cluster is fully initialized and ready for use!${NC}"
 echo ""
 echo "Summary:"
+echo "  - Cleanup:         Orphaned resources removed"
 echo "  - Local Registry:  Running"
 echo "  - VMs:             Running"
 echo "  - Talos/K8s:       Bootstrapped"
