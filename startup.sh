@@ -77,10 +77,19 @@ print_header() {
 # =============================================================================
 if [[ "$SKIP_CLEANUP" != "true" ]]; then
     print_header "Phase 0: Cleanup Orphaned Libvirt Resources"
+    
+    echo -e "${BLUE}[DEBUG] Starting cleanup phase at $(date)${NC}"
+    echo -e "${BLUE}[DEBUG] PROJECT_ROOT: $PROJECT_ROOT${NC}"
+    echo -e "${BLUE}[DEBUG] LIBVIRT_URI: $LIBVIRT_URI${NC}"
 
     # VM name prefix (derived from project directory name, used by vagrant-libvirt)
     VM_PREFIX="$(basename "$PROJECT_ROOT")_"
     
+    echo -e "${BLUE}[DEBUG] VM_PREFIX: $VM_PREFIX${NC}"
+    echo -e "${BLUE}[DEBUG] MASTER_NAME: $MASTER_NAME${NC}"
+    echo -e "${BLUE}[DEBUG] WORKER_NAME_PREFIX: $WORKER_NAME_PREFIX${NC}"
+    echo -e "${BLUE}[DEBUG] WORKER_COUNT: $WORKER_COUNT${NC}"
+
     # Expected VM names
     EXPECTED_VMS=("$MASTER_NAME")
     for i in $(seq 1 "$WORKER_COUNT"); do
@@ -90,6 +99,10 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
     echo "Scanning for orphaned VMs in libvirt..."
     echo "  Expected VMs: ${EXPECTED_VMS[*]}"
     echo "  VM Prefix: $VM_PREFIX"
+    echo ""
+
+    echo -e "${BLUE}[DEBUG] Listing all VMs in libvirt...${NC}"
+    virsh -c "$LIBVIRT_URI" list --all
     echo ""
 
     # Find and remove VMs that don't match expected names
@@ -127,8 +140,13 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
     done
 
     echo ""
+    echo -e "${BLUE}[DEBUG] STORAGE_POOL: $STORAGE_POOL${NC}"
     echo "Cleaning up orphaned volumes..."
     STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
+    
+    echo -e "${BLUE}[DEBUG] Listing volumes in pool '$STORAGE_POOL'...${NC}"
+    virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null || echo "Failed to list volumes"
+    echo ""
     
     # List all volumes and remove those not belonging to expected VMs
     virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | while read -r vol rest; do
@@ -155,10 +173,14 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
     done
 
     echo ""
+    echo -e "${BLUE}[DEBUG] NETWORK_NAME: $NETWORK_NAME${NC}"
     echo "Checking for orphaned networks..."
     # Check if network exists but has no connected VMs
     if virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME" &>/dev/null; then
+        echo -e "${BLUE}[DEBUG] Network '$NETWORK_NAME' info:${NC}"
+        virsh -c "$LIBVIRT_URI" net-info "$NETWORK_NAME"
         active_vms=$(virsh -c "$LIBVIRT_URI" net-dhcp-leases "$NETWORK_NAME" 2>/dev/null | grep -c "^[[:space:]]" || echo "0")
+        echo -e "${BLUE}[DEBUG] Active VMs in network: $active_vms${NC}"
         if [[ "$active_vms" -eq 0 ]]; then
             echo "  Network '$NETWORK_NAME' exists but has no active VMs"
             echo "  Preserving network for reuse"
@@ -170,6 +192,7 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
     fi
 
     echo ""
+    echo -e "${BLUE}[DEBUG] Cleanup phase completed at $(date)${NC}"
     echo -e "${GREEN}✓ Orphaned resource cleanup complete${NC}"
 else
     echo -e "${YELLOW}Phase 0: Skipping Orphaned Resource Cleanup${NC}"
@@ -180,14 +203,23 @@ fi
 # =============================================================================
 if [[ "$SKIP_REGISTRY" != "true" ]]; then
     print_header "Phase 1: Local Registry Setup"
+    
+    echo -e "${BLUE}[DEBUG] Starting Phase 1 at $(date)${NC}"
 
     echo "Starting local registry..."
-    "$PROJECT_ROOT/scripts/start-local-registry.sh"
+    if ! "$PROJECT_ROOT/scripts/start-local-registry.sh"; then
+        echo -e "${RED}ERROR: Failed to start local registry${NC}"
+        exit 1
+    fi
 
     echo "Populating local registry with images..."
-    "$PROJECT_ROOT/scripts/populate-local-registry.sh"
+    if ! "$PROJECT_ROOT/scripts/populate-local-registry.sh"; then
+        echo -e "${RED}ERROR: Failed to populate local registry${NC}"
+        exit 1
+    fi
 
     echo -e "${GREEN}✓ Local registry ready${NC}"
+    echo -e "${BLUE}[DEBUG] Phase 1 completed at $(date)${NC}"
 else
     echo -e "${YELLOW}Phase 1: Skipping Local Registry Setup${NC}"
 fi
@@ -197,15 +229,21 @@ fi
 # =============================================================================
 if [[ "$SKIP_VMS" != "true" ]]; then
     print_header "Phase 2: VM Provisioning"
+    
+    echo -e "${BLUE}[DEBUG] Starting Phase 2 at $(date)${NC}"
+    echo -e "${BLUE}[DEBUG] FORCE_RESET: $FORCE_RESET${NC}"
 
     VMS_ARGS=""
     [[ "$FORCE_RESET" == "true" ]] && VMS_ARGS="-f"
+    
+    echo -e "${BLUE}[DEBUG] Running vms-startup.sh with args: '$VMS_ARGS'${NC}"
 
     if ! "$PROJECT_ROOT/scripts/vms-startup.sh" $VMS_ARGS; then
         echo -e "${RED}ERROR: VM provisioning failed${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ VMs are up and running${NC}"
+    echo -e "${BLUE}[DEBUG] Phase 2 completed at $(date)${NC}"
 else
     echo -e "${YELLOW}Phase 2: Skipping VM Provisioning${NC}"
 fi
@@ -215,12 +253,15 @@ fi
 # =============================================================================
 if [[ "$SKIP_BOOTSTRAP" != "true" ]]; then
     print_header "Phase 3: Talos Cluster Bootstrap"
+    
+    echo -e "${BLUE}[DEBUG] Starting Phase 3 at $(date)${NC}"
 
     if ! "$PROJECT_ROOT/scripts/talos-bootstrap.sh"; then
         echo -e "${RED}ERROR: Talos bootstrap failed${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ Talos cluster bootstrapped${NC}"
+    echo -e "${BLUE}[DEBUG] Phase 3 completed at $(date)${NC}"
 else
     echo -e "${YELLOW}Phase 3: Skipping Talos Bootstrap${NC}"
 fi
@@ -230,6 +271,8 @@ fi
 # =============================================================================
 if [[ "$SKIP_COMPONENTS" != "true" ]]; then
     print_header "Phase 4: Kubernetes Components (CNI, Metrics, MetalLB)"
+    
+    echo -e "${BLUE}[DEBUG] Starting Phase 4 at $(date)${NC}"
 
     # Default to Cilium, Metrics Server, and MetalLB as they are standard for this project
     if ! "$PROJECT_ROOT/scripts/k8s-components.sh" --cni-cilium --with-metrics --with-metallb; then
@@ -237,6 +280,7 @@ if [[ "$SKIP_COMPONENTS" != "true" ]]; then
         exit 1
     fi
     echo -e "${GREEN}✓ Kubernetes components installed${NC}"
+    echo -e "${BLUE}[DEBUG] Phase 4 completed at $(date)${NC}"
 else
     echo -e "${YELLOW}Phase 4: Skipping Kubernetes Components${NC}"
 fi
