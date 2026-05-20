@@ -1,16 +1,20 @@
 # Environment and config files
 .env
 .env.local
-.env.*
 
 # Logs and temporary files
 *.log
 *.tmp
 *.swp
+*.iso
+*.qcow2
+*.raw
 
 # Editors and IDEs
 .vscode/
 .idea/
+.qwen/
+.vagrant/
 
 # Dependencies and build artifacts
 node_modules/
