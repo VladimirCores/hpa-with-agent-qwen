@@ -145,12 +145,31 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
     STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
     
     echo -e "${BLUE}[DEBUG] Listing volumes in pool '$STORAGE_POOL'...${NC}"
-    virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null || echo "Failed to list volumes"
+    # Try to list volumes, handle polkit/auth issues gracefully
+    # The "Authorization not available" warning is printed to stderr but command may still succeed
+    VOL_LIST_OUTPUT=$(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>&1)
+    echo "$VOL_LIST_OUTPUT"
     echo ""
     
     # List all volumes and remove those not belonging to expected VMs
-    virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | tail -n +2 | grep -v "^-" | while read -r vol rest; do
-        [[ -z "$vol" ]] && continue
+    # Filter out header lines, separator lines, and authorization warnings
+    # Only process actual volume names (alphanumeric with dots, underscores, hyphens)
+    echo "$VOL_LIST_OUTPUT" | while read -r line; do
+        # Skip authorization warnings
+        [[ "$line" == *"Authorization"* ]] && continue
+        # Skip header line (contains "Name" and "Path")
+        [[ "$line" == *"Name"* ]] && [[ "$line" == *"Path"* ]] && continue
+        # Skip separator lines (only dashes)
+        [[ "$line" =~ ^[[:space:]]*-+[[:space:]]*$ ]] && continue
+        # Skip empty lines
+        [[ -z "$(echo "$line" | tr -d '[:space:]')" ]] && continue
+        
+        # Extract volume name (first field)
+        vol=$(echo "$line" | awk '{print $1}')
+        
+        # Skip if volume name looks like a header word
+        [[ "$vol" == "Name" ]] && continue
+        [[ "$vol" == "Path" ]] && continue
         
         # Check if volume belongs to expected VMs or is the ISO
         is_expected=false
