@@ -109,18 +109,14 @@ for config_file in "$CONFIG_DIR/controlplane.yaml" "$CONFIG_DIR/worker.yaml"; do
         ' "$config_file" 2>/dev/null
     done
 
-    # Configure insecure access for the local registry
+    # Use local registry for installer image (standard container ref, no http:// prefix)
+    # Requires pre-pulling and pushing to local registry:
+    #   podman pull ghcr.io/siderolabs/installer:$VERSION
+    #   podman tag ghcr.io/siderolabs/installer:$VERSION ${NETWORK_IP}:5000/siderolabs/installer:$VERSION
+    #   podman push ${NETWORK_IP}:5000/siderolabs/installer:$VERSION --tls-verify=false
     yq -i eval '
         select(.kind == null) |
-        .machine.registries.config."'"${NETWORK_IP}"':5000".tls.insecureSkipVerify = true
-    ' "$config_file" 2>/dev/null
-
-    # Use local registry for installer image if possible (requires manual pull/push to local registry)
-    # For now, we point it to the local registry endpoint, but it might fail if the image is not there.
-    # Users should pre-pull images: podman pull ghcr.io/siderolabs/installer:$VERSION && podman push ...
-    yq -i eval '
-        select(.kind == null) |
-        .machine.install.image = "http://'"${NETWORK_IP}"':5000/siderolabs/installer:'"${INSTALLER_VERSION}"'"
+        .machine.install.image = "'"${NETWORK_IP}"':5000/siderolabs/installer:'"${INSTALLER_VERSION}"'"
     ' "$config_file" 2>/dev/null || {
         echo "  WARNING: Failed to add registry mirror to $config_file (yq failed, skipping)"
     }

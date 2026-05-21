@@ -1,8 +1,6 @@
-```bash
 # Environment
 .env
 .env.local
-*.env.*
 
 # Logs and temp files
 *.log
@@ -10,8 +8,14 @@
 *.swp
 
 # Editors
+.vagrant/
 .vscode/
 .idea/
+.qwen/
+
+# Generated configs
+talos-cluster/
+.firecrawl/
 
 # Dependencies
 node_modules/
@@ -64,8 +68,10 @@ htmlcov/
 *.Z
 *.lz
 *.lzo
+*.iso
+*.qcow2
+*.raw
 *.tar.gz
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```

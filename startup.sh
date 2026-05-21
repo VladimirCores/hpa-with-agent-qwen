@@ -143,17 +143,23 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
     echo -e "${BLUE}[DEBUG] STORAGE_POOL: $STORAGE_POOL${NC}"
     echo "Cleaning up orphaned volumes..."
     STORAGE_POOL="${STORAGE_POOL:-talos-pool}"
-    
+
     echo -e "${BLUE}[DEBUG] Listing volumes in pool '$STORAGE_POOL'...${NC}"
-    # Try to list volumes, handle polkit/auth issues gracefully
-    # The "Authorization not available" warning is printed to stderr but command may still succeed
-    VOL_LIST_OUTPUT=$(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>&1)
-    echo "$VOL_LIST_OUTPUT"
-    echo ""
-    
-    # List all volumes and remove those not belonging to expected VMs
-    # Filter out header lines, separator lines, and authorization warnings
-    # Only process actual volume names (alphanumeric with dots, underscores, hyphens)
+    # Check if the storage pool exists before attempting to list volumes.
+    # Avoids a silent crash with set -e when the pool hasn't been created yet
+    # (e.g. first run, or after full cleanup).
+    if ! virsh -c "$LIBVIRT_URI" pool-info "$STORAGE_POOL" &>/dev/null; then
+        echo -e "${YELLOW}  Storage pool '$STORAGE_POOL' does not exist yet. Skipping volume cleanup.${NC}"
+    else
+        # Try to list volumes, handle polkit/auth issues gracefully
+        # The "Authorization not available" warning is printed to stderr but command may still succeed
+        VOL_LIST_OUTPUT=$(virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>&1)
+        echo "$VOL_LIST_OUTPUT"
+        echo ""
+
+        # List all volumes and remove those not belonging to expected VMs
+        # Filter out header lines, separator lines, and authorization warnings
+        # Only process actual volume names (alphanumeric with dots, underscores, hyphens)
     echo "$VOL_LIST_OUTPUT" | while read -r line; do
         # Skip authorization warnings
         [[ "$line" == *"Authorization"* ]] && continue
@@ -190,6 +196,7 @@ if [[ "$SKIP_CLEANUP" != "true" ]]; then
                 echo "    ✓ Removed" || echo "    ✗ Failed"
         fi
     done
+    fi  # end of pool-exists check
 
     echo ""
     echo -e "${BLUE}[DEBUG] NETWORK_NAME: $NETWORK_NAME${NC}"
