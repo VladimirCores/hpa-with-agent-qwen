@@ -1,10 +1,17 @@
-# Environment and temporary files
+```bash
+# Environment
 .env
 .env.local
 *.env.*
-*.tmp
+
+# Logs and temp files
 *.log
+*.tmp
 *.swp
+
+# Editors
+.vscode/
+.idea/
 
 # Dependencies
 node_modules/
@@ -13,27 +20,21 @@ venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
-.julia/
-zig*/
-julia-*/
-
-# Build artifacts
 dist/
 build/
 target/
+.gradle/
+
+# Compiled files
 *.pyc
 *.class
 *.o
-*.obj
 *.exe
 *.dll
 *.so
 *.a
+*.obj
 *.out
-
-# Editors
-.vscode/
-.idea/
 
 # System files
 .DS_Store
@@ -67,3 +68,4 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+```
