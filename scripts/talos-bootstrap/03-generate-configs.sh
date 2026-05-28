@@ -109,21 +109,14 @@ for config_file in "$CONFIG_DIR/controlplane.yaml" "$CONFIG_DIR/worker.yaml"; do
         ' "$config_file" 2>/dev/null
     done
 
-    # Configure insecure access for the local registry
-    yq -i eval '
-        select(.kind == null) |
-        .machine.registries.config."'"${NETWORK_IP}"':5000".tls.insecureSkipVerify = true
-    ' "$config_file" 2>/dev/null
-
-    # Use local registry for installer image if possible (requires manual pull/push to local registry)
-    # For now, we point it to the local registry endpoint, but it might fail if the image is not there.
-    # Users should pre-pull images: podman pull ghcr.io/siderolabs/installer:$VERSION && podman push ...
-    yq -i eval '
-        select(.kind == null) |
-        .machine.install.image = "http://'"${NETWORK_IP}"':5000/siderolabs/installer:'"${INSTALLER_VERSION}"'"
-    ' "$config_file" 2>/dev/null || {
-        echo "  WARNING: Failed to add registry mirror to $config_file (yq failed, skipping)"
-    }
+    # Do NOT set machine.install.image to local registry.
+    # The installer image is ghcr.io/siderolabs/installer:$VERSION.
+    # The ghcr.io mirror (http://${NETWORK_IP}:5000) handles caching transparently.
+    # Setting install.image directly to ${NETWORK_IP}:5000/siderolabs/installer fails
+    # because containerd defaults to HTTPS for image refs without a scheme, but the
+    # local registry only serves HTTP. Mirror endpoints explicitly use http:// prefix,
+    # avoiding this TLS mismatch.
+    echo "  Skipping install.image override (mirror handles caching via ghcr.io endpoint)"
 done
 echo "  ✓ Registry mirrors configured for: ${REGISTRIES[*]}"
 

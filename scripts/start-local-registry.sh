@@ -35,6 +35,7 @@ podman run -d \
   -p $REGISTRY_PORT:5000 \
   --name "$REGISTRY_NAME" \
   --restart=always \
+  --privileged \
   docker.io/library/registry:2
 
 echo "✓ Local registry is now running on port $REGISTRY_PORT."

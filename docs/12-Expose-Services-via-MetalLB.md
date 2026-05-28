@@ -56,7 +56,7 @@ K8S_DASHBOARD_LB_IP=192.168.123.201
 When you run `./scripts/k8s-components.sh --with-metallb`:
 
 1. **MetalLB is installed** with configured IP pool
-2. **Hubble UI is exposed** (if `CILIUM_HUBBLE_ENABLED=true`)
+2. **Hubble UI is exposed** (if `HUBBLE_ENABLED=true`)
    - Service type changed to `LoadBalancer`
    - External IP assigned from pool
    - Accessible at `http://<EXTERNAL_IP>`

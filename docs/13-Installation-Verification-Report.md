@@ -37,7 +37,7 @@
 
 **Configuration**:
 - `CILIUM_KUBE_PROXY_REPLACEMENT=true`
-- `CILIUM_HUBBLE_ENABLED=true`
+- `HUBBLE_ENABLED=true`
 
 **Result**: CNI fully operational, kube-proxy successfully removed
 

@@ -407,20 +407,41 @@ for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
 done
 
 # =============================================================================
-# Step 7: Configure UEFI (skipped - Talos works fine with BIOS boot)
+# Step 7: Create CoW Overlays from Raw Image (if using raw image mode)
 # =============================================================================
-print_header "Step 7/8: Skip UEFI Configuration"
+if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
+    print_header "Step 7/9: Create CoW Overlays"
+
+    echo "Creating qcow2 CoW overlays from base image..."
+    echo "  This replaces the blank raw volumes created by Vagrant"
+    echo "  with CoW overlays backed by the Talos raw image."
+    echo ""
+
+    run_step "7" "Creating CoW overlays" "$STEPS_DIR/04-create-vm-disks.sh" \
+        STORAGE_POOL="$STORAGE_POOL" \
+        LIBVIRT_URI="$LIBVIRT_URI" \
+        USE_RAW_IMAGE="$USE_RAW_IMAGE" \
+        TALOS_RAW_IMAGE_PATH="$TALOS_RAW_IMAGE_PATH"
+else
+    print_header "Step 7/9: Skip CoW Overlays (ISO mode)"
+    print_success "Raw image mode disabled, skipping CoW overlays"
+    echo ""
+fi
+
+# =============================================================================
+# Step 8: Configure UEFI (skipped - Talos works fine with BIOS boot)
+# =============================================================================
+print_header "Step 8/9: Skip UEFI Configuration"
 
 print_success "UEFI configuration skipped (Talos works with BIOS boot)"
-echo "  VMs will boot from ISO and install to disk using BIOS firmware"
 echo ""
 
 # =============================================================================
-# Step 8: Wait for Talos to Boot
+# Step 9: Wait for Talos to Boot
 # =============================================================================
-print_header "Step 8/8: Wait for Talos Boot"
+print_header "Step 9/9: Wait for Talos Boot"
 
-run_step "8" "Waiting for Talos boot" "$STEPS_DIR/08-wait-for-talos.sh" \
+run_step "9" "Waiting for Talos boot" "$STEPS_DIR/08-wait-for-talos.sh" \
     MASTER_IP="$MASTER_IP" \
     WORKER_COUNT="$WORKER_COUNT" \
     WORKER_IP_BASE="$WORKER_IP_BASE" \

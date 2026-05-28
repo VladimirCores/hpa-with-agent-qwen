@@ -127,7 +127,7 @@ step_02_install_cni() {
         cilium)
             CILIUM_VERSION="$CILIUM_VERSION" \
             CILIUM_KUBE_PROXY_REPLACEMENT="$CILIUM_KUBE_PROXY_REPLACEMENT" \
-            CILIUM_HUBBLE_ENABLED="$CILIUM_HUBBLE_ENABLED" \
+            HUBBLE_ENABLED="$HUBBLE_ENABLED" \
             CILIUM_HUBBLE_RELAY_ENABLED="$CILIUM_HUBBLE_RELAY_ENABLED" \
             bash "$STEPS_DIR/02-install-cilium.sh"
             ;;

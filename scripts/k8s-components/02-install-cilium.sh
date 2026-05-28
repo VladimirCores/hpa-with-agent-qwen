@@ -15,7 +15,7 @@ echo "[2/5] Installing Cilium CNI $CILIUM_VERSION..."
 echo ""
 echo "  Configuration:"
 echo "    kube-proxy replacement: $CILIUM_KUBE_PROXY_REPLACEMENT"
-echo "    Hubble UI:              $CILIUM_HUBBLE_ENABLED"
+echo "    Hubble UI:              $HUBBLE_ENABLED"
 echo ""
 
 # Check if Cilium already exists
@@ -90,11 +90,11 @@ CILIUM_CMD=(
     --set "securityContext.capabilities.cleanCiliumState={NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}"
     --set "cni.chainingMode=none"
     --set "cni.customConf=false"
-    --set "hubble.enabled=$CILIUM_HUBBLE_ENABLED"
+    --set "hubble.enabled=$HUBBLE_ENABLED"
 )
 
 # Add Hubble relay if enabled
-if [[ "$CILIUM_HUBBLE_ENABLED" == "true" ]]; then
+if [[ "$HUBBLE_ENABLED" == "true" ]]; then
     CILIUM_CMD+=(--set "hubble.relay.enabled=$CILIUM_HUBBLE_RELAY_ENABLED")
     CILIUM_CMD+=(--set "hubble.ui.enabled=true")
 fi
@@ -124,7 +124,7 @@ else
 fi
 
 # Enable Hubble CLI if available
-if [[ "$CILIUM_HUBBLE_ENABLED" == "true" ]]; then
+if [[ "$HUBBLE_ENABLED" == "true" ]]; then
     echo ""
     echo "  Enabling Hubble..."
     
@@ -185,7 +185,7 @@ if [[ "$CILIUM_KUBE_PROXY_REPLACEMENT" == "true" ]]; then
 else
     echo "  ✓ Cilium installed (kube-proxy enabled)"
 fi
-if [[ "$CILIUM_HUBBLE_ENABLED" == "true" ]]; then
+if [[ "$HUBBLE_ENABLED" == "true" ]]; then
     echo "  ✓ Hubble UI enabled for network observability"
 fi
 echo ""
