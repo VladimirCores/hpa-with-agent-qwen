@@ -714,7 +714,7 @@ kubectl patch svc <service-name> -p '{"spec": {"type": "ClusterIP"}}'
    ```
 
 2. **Create Gateway API routes:**
-   - See: `docs/04-Istio-Envoy-Gateway-Preview.md`
+   - See: `docs/04-Istio-Envoy-Gateway-Integration.md`
 
 3. **Test HPA with LoadBalancer:**
    - See: `docs/06-HPA-Study-Guide.md`

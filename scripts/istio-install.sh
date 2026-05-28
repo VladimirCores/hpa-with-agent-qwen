@@ -1,9 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Istio + Kiali Installation
+# Istio + Envoy Gateway Installation - Orchestrator
 # =============================================================================
-# Installs Istio and optionally Kiali service mesh visualization.
-# Currently supports Kiali installation when KIALA_ENABLED=true.
+# Installs Istio service mesh with Envoy Gateway ingress, and optionally Kiali.
+# Runs step scripts in sequence (following k8s-components.sh pattern).
 # =============================================================================
 
 set -euo pipefail
@@ -11,112 +11,184 @@ set -euo pipefail
 # Script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+STEPS_DIR="$SCRIPT_DIR/istio"
 
 # Source .env file
-if [[ -f "$PROJECT_ROOT/.env" ]]; then
-    set -a
-    source "$PROJECT_ROOT/.env"
-    set +a
-fi
+set -a
+source "$PROJECT_ROOT/.env"
+set +a
 
+# Configuration from .env (with defaults)
+ISTIO_VERSION="${ISTIO_VERSION:-1.22.0}"
+ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-istio-system}"
+ISTIO_INGRESS_ENABLED="${ISTIO_INGRESS_ENABLED:-false}"
+ENVOY_GATEWAY_VERSION="${ENVOY_GATEWAY_VERSION:-1.1.0}"
+ENVOY_GATEWAY_NAMESPACE="${ENVOY_GATEWAY_NAMESPACE:-envoy-gateway-system}"
+ENVOY_GATEWAY_REPLICAS="${ENVOY_GATEWAY_REPLICAS:-2}"
+ENVOY_GATEWAY_LB_IP="${ENVOY_GATEWAY_LB_IP:-192.168.123.200}"
 KIALA_ENABLED="${KIALA_ENABLED:-false}"
 
-echo "=== Istio with Envoy Gateway Installation ==="
+# Parse arguments
+SKIP_VERIFY=false
+
+while getopts "s-:" opt; do
+    case $opt in
+        s) SKIP_VERIFY=true ;;
+        -)
+            case "${OPTARG}" in
+                skip-verify) SKIP_VERIFY=true ;;
+                *) echo "Unknown option: --${OPTARG}"; exit 1 ;;
+            esac
+            ;;
+        *) echo "Usage: $0 [-s] [--skip-verify]"; exit 1 ;;
+    esac
+done
+
+# =============================================================================
+# Main Script
+# =============================================================================
+echo "=== Istio + Envoy Gateway Installation ==="
 echo ""
-
-# Check prerequisites
-echo "Checking prerequisites..."
-echo ""
-
-if ! command -v kubectl &>/dev/null; then
-    echo "ERROR: kubectl not found. Please install kubectl first."
-    exit 1
-fi
-
-# Check if cluster is accessible
-if ! kubectl get nodes &>/dev/null; then
-    echo "ERROR: Cannot connect to Kubernetes cluster."
-    echo "  Make sure your cluster is running and kubeconfig is set."
-    exit 1
-fi
-
-echo "Kubernetes nodes:"
-kubectl get nodes
-echo ""
-
-echo "Current namespaces:"
-kubectl get namespaces 2>/dev/null | head -10 || true
-echo ""
-
-# Check for Istio
-if kubectl get namespace istio-system &>/dev/null; then
-    echo "Istio installation detected:"
-    kubectl get pods -n istio-system 2>/dev/null || echo "  (no pods found)"
-else
-    echo "Istio: Not installed"
-    echo "  To install Istio, follow: docs/04-Istio-Envoy-Gateway-Preview.md"
-fi
+echo "Configuration:"
+echo "  Istio version:          $ISTIO_VERSION"
+echo "  Istio namespace:        $ISTIO_NAMESPACE"
+echo "  Envoy Gateway version:  $ENVOY_GATEWAY_VERSION"
+echo "  Envoy Gateway IP:       $ENVOY_GATEWAY_LB_IP"
+echo "  Envoy Gateway replicas: $ENVOY_GATEWAY_REPLICAS"
+echo "  Istio ingress enabled:  $ISTIO_INGRESS_ENABLED"
+echo "  Kiali enabled:          $KIALA_ENABLED"
 echo ""
 
 # =============================================================================
-# Install Kiali Service Mesh Visualization
+# Step Functions
 # =============================================================================
-if [[ "$KIALA_ENABLED" == "true" ]]; then
-    echo "=== Installing Kiali ==="
-    echo ""
 
-    # Kiali requires Istio
-    if ! kubectl get namespace istio-system &>/dev/null; then
-        echo "  ⚠ Istio is not installed. Kiali requires Istio."
-        echo "    Install Istio first, then run this script again with KIALA_ENABLED=true."
-        echo ""
+step_01_check_prerequisites() {
+    bash "$STEPS_DIR/01-check-prerequisites.sh"
+}
+
+step_02_install_istio_base() {
+    ISTIO_VERSION="$ISTIO_VERSION" \
+    ISTIO_NAMESPACE="$ISTIO_NAMESPACE" \
+    bash "$STEPS_DIR/02-install-istio-base.sh"
+}
+
+step_03_install_istiod() {
+    ISTIO_VERSION="$ISTIO_VERSION" \
+    ISTIO_NAMESPACE="$ISTIO_NAMESPACE" \
+    bash "$STEPS_DIR/03-install-istiod.sh"
+}
+
+step_04_install_envoy_gateway() {
+    ENVOY_GATEWAY_VERSION="$ENVOY_GATEWAY_VERSION" \
+    ENVOY_GATEWAY_NAMESPACE="$ENVOY_GATEWAY_NAMESPACE" \
+    ENVOY_GATEWAY_REPLICAS="$ENVOY_GATEWAY_REPLICAS" \
+    ENVOY_GATEWAY_LB_IP="$ENVOY_GATEWAY_LB_IP" \
+    bash "$STEPS_DIR/04-install-envoy-gateway.sh"
+}
+
+step_05_configure_integration() {
+    ISTIO_NAMESPACE="$ISTIO_NAMESPACE" \
+    ENVOY_GATEWAY_NAMESPACE="$ENVOY_GATEWAY_NAMESPACE" \
+    ISTIO_INGRESS_ENABLED="$ISTIO_INGRESS_ENABLED" \
+    bash "$STEPS_DIR/05-configure-integration.sh"
+}
+
+step_06_install_kiali() {
+    ISTIO_NAMESPACE="$ISTIO_NAMESPACE" \
+    KIALA_ENABLED="$KIALA_ENABLED" \
+    bash "$STEPS_DIR/06-install-kiali.sh"
+}
+
+step_07_verify() {
+    ISTIO_NAMESPACE="$ISTIO_NAMESPACE" \
+    ENVOY_GATEWAY_NAMESPACE="$ENVOY_GATEWAY_NAMESPACE" \
+    ENVOY_GATEWAY_LB_IP="$ENVOY_GATEWAY_LB_IP" \
+    bash "$STEPS_DIR/07-verify.sh"
+}
+
+# =============================================================================
+# Helper Function
+# =============================================================================
+
+run_step() {
+    local step_name="$1"
+    local step_func="$2"
+
+    echo "───────────────────────────────────────────────────────"
+    echo "  Step: $step_name"
+    echo "───────────────────────────────────────────────────────"
+
+    if $step_func; then
+        echo "  ✓ Completed: $step_name"
     else
-        # Check if Kiali is already installed
-        if kubectl get deployment kiali -n istio-system &>/dev/null; then
-            echo "  ✓ Kiali already installed"
-        else
-            # Check for helm
-            if ! command -v helm &>/dev/null; then
-                echo "  ERROR: helm not found. Install helm to enable Kiali installation."
-                echo "    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
-                exit 1
-            fi
-
-            echo "  Adding Kiali Helm repository..."
-            helm repo add kiali https://kiali.org/helm-charts 2>/dev/null || true
-            helm repo update
-
-            echo "  Installing Kiali (anonymous auth)..."
-            helm upgrade --install kiali kiali/kiali-server \
-                --namespace istio-system \
-                --set auth.strategy="anonymous" \
-                --wait \
-                --timeout 180s
-
-            echo "  ✓ Kiali installed"
-        fi
-
-        # Show access info
         echo ""
-        echo "  Kiali access:"
-        echo "    Port-forward: kubectl port-forward -n istio-system svc/kiali 20001:20001"
-        echo "    URL: http://localhost:20001"
+        echo "═══════════════════════════════════════════════════════════"
+        echo "  Installation failed at: $step_name"
+        echo "═══════════════════════════════════════════════════════════"
         echo ""
-
-        # Check Kiali pods
-        KIALI_PODS=$(kubectl get pods -n istio-system -l app=kiali --no-headers 2>/dev/null | wc -l)
-        if (( KIALI_PODS > 0 )); then
-            echo "  Kiali pods:"
-            kubectl get pods -n istio-system -l app=kiali
-        fi
+        echo "Troubleshooting:"
+        echo "  1. Check the error message above"
+        echo "  2. Verify cluster connectivity: kubectl get nodes"
+        echo "  3. Check for already-installed components: kubectl get ns"
+        echo "  4. Re-run script: $0"
+        echo ""
+        exit 1
     fi
     echo ""
+}
+
+# =============================================================================
+# Execute Steps
+# =============================================================================
+
+run_step "01: Check prerequisites"                              "step_01_check_prerequisites"
+run_step "02: Install Istio base (CRDs)"                        "step_02_install_istio_base"
+run_step "03: Install Istiod (control plane)"                   "step_03_install_istiod"
+run_step "04: Install Envoy Gateway"                            "step_04_install_envoy_gateway"
+run_step "05: Configure Istio + Envoy Gateway integration"      "step_05_configure_integration"
+run_step "06: Install Kiali (optional)"                         "step_06_install_kiali"
+
+if [[ "$SKIP_VERIFY" != "true" ]]; then
+    run_step "07: Verify installation"                          "step_07_verify"
+else
+    echo "───────────────────────────────────────────────────────"
+    echo "  Step 07: Verify installation (skipped)"
+    echo "───────────────────────────────────────────────────────"
+    echo ""
 fi
 
-echo "=== Complete ==="
+# =============================================================================
+# Summary
+# =============================================================================
+echo "═══════════════════════════════════════════════════════════"
+echo "  Installation Complete"
+echo "═══════════════════════════════════════════════════════════"
 echo ""
-echo "Quick reference:"
-echo "  Hubble UI:    kubectl port-forward -n kube-system svc/hubble-ui 8080:80"
-echo "  Kiali:        kubectl port-forward -n istio-system svc/kiali 20001:20001"
-echo "  Grafana:      kubectl port-forward -n istio-system svc/grafana 3000:3000"
+echo "Installed components:"
+echo "  ✓ Istio (istiod) — Service mesh control plane"
+echo "  ✓ Envoy Gateway — Ingress gateway (Gateway API)"
+if [[ "$KIALA_ENABLED" == "true" ]]; then
+    echo "  ✓ Kiali — Service mesh visualization"
+fi
+echo ""
+echo "Access:"
+echo "  Envoy Gateway (via MetalLB):  http://$ENVOY_GATEWAY_LB_IP"
+echo "  Kiali:                        kubectl port-forward -n $ISTIO_NAMESPACE svc/kiali 20001:20001"
+echo ""
+echo "Configuration: $PROJECT_ROOT/.env"
+echo ""
+echo "Next steps:"
+echo "  1. Deploy sample application with sidecar injection:"
+echo "     kubectl create ns sample-app"
+echo "     kubectl label ns sample-app istio-injection=enabled"
+echo "     kubectl -n sample-app apply -f docs/examples/sample-app.yaml"
+echo ""
+echo "  2. Create HTTPRoute to expose via Envoy Gateway:"
+echo "     See docs/04-Istio-Envoy-Gateway-Integration.md"
+echo ""
+echo "  3. Configure HPA:"
+echo "     kubectl -n sample-app autoscale deployment my-app --cpu-percent=50 --min=1 --max=10"
+echo ""
+echo "=== Istio + Envoy Gateway Installation Complete ==="
 echo ""

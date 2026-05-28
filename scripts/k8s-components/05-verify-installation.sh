@@ -33,7 +33,7 @@ case "$INSTALLED_CNI" in
             if ! kubectl get daemonset kube-proxy -n kube-system &>/dev/null; then
                 echo "  ✓ kube-proxy replacement: enabled (BPF-based service routing)"
             else
-                echo "  ⚠ kube-proxy: running (Cilium operating in hybrid mode)"
+                echo "  ✗ kube-proxy still running (should have been replaced by Cilium)"
             fi
             
             # Check Hubble

@@ -22,10 +22,8 @@ Add to your `.env` file:
 # Cilium Version
 CILIUM_VERSION="1.19.1"
 
-# Disable kube-proxy (Cilium replaces it with BPF-based service routing)
-# Default: true (kube-proxy disabled, Cilium handles service routing)
-# Set to false to keep kube-proxy running alongside Cilium
-CILIUM_KUBE_PROXY_REPLACEMENT=true
+# kube-proxy replacement: always enabled (BPF-based service routing)
+# Cilium replaces kube-proxy for better performance and Talos compatibility
 
 # Hubble UI - Network observability
 # Default: true (Hubble UI enabled for network flow monitoring)
@@ -37,11 +35,10 @@ HUBBLE_ENABLED=true
 CILIUM_HUBBLE_RELAY_ENABLED=true
 ```
 
-## kube-proxy Replacement
+## kube-proxy Replacement (Always Enabled)
 
-### Enabled by Default (Recommended)
-
-When `CILIUM_KUBE_PROXY_REPLACEMENT=true`:
+Cilium always replaces kube-proxy with eBPF-based service routing. This is a
+hard requirement — no configuration toggle is exposed.
 
 **Benefits:**
 - ✅ Better performance (BPF vs iptables/IPVS)
@@ -54,21 +51,6 @@ When `CILIUM_KUBE_PROXY_REPLACEMENT=true`:
 Traditional: Pod → kube-proxy (iptables/IPVS) → Service → Pod
 Cilium BPF:  Pod → BPF program → Service → Pod
 ```
-
-### Disabled (Hybrid Mode)
-
-When `CILIUM_KUBE_PROXY_REPLACEMENT=false`:
-
-**Use cases:**
-- Testing/development
-- Compatibility with legacy applications
-- Gradual migration scenarios
-
-**Behavior:**
-- Both Cilium and kube-proxy run
-- Cilium provides CNI functionality
-- kube-proxy handles Service routing
-- Higher resource usage
 
 ## Hubble UI
 
@@ -212,16 +194,15 @@ cilium observe --verdict DROPPED --since 5m
 
 ### Enable kube-proxy (After Installation)
 
-If you installed with kube-proxy replacement enabled and want to re-enable it:
+kube-proxy replacement is always enabled in the default install. To re-enable
+kube-proxy alongside Cilium (not recommended), reinstall with an explicit
+`--set kubeProxyReplacement=false`:
 
 ```bash
-# 1. Update .env
-CILIUM_KUBE_PROXY_REPLACEMENT=false
-
-# 2. Reinstall Cilium
+# Reinstall Cilium without kube-proxy replacement
 ./scripts/k8s-components.sh --cni-cilium
-
-# Note: This will re-add kube-proxy to the cluster
+# Then patch:
+cilium upgrade --set kubeProxyReplacement=false
 ```
 
 ### Disable Hubble UI (After Installation)

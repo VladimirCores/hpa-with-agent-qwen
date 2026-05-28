@@ -75,7 +75,7 @@ with-agent-qwen/
 │   ├── 01-Network-setup.md
 │   ├── 02-Vagrant-VMs-provision.md
 │   ├── 03-Talos-Configuration.md
-│   └── 04-Istio-Envoy-Gateway-Preview.md
+│   └── 04-Istio-Envoy-Gateway-Integration.md
 ├── scripts/              # Automation scripts
 │   ├── vms-startup/      # VM startup step scripts
 │   ├── prepare-network.sh

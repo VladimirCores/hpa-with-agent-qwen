@@ -14,7 +14,7 @@ source "$STEP_DIR/00-setup.sh"
 echo "[2/5] Installing Cilium CNI $CILIUM_VERSION..."
 echo ""
 echo "  Configuration:"
-echo "    kube-proxy replacement: $CILIUM_KUBE_PROXY_REPLACEMENT"
+echo "    kube-proxy replacement: enabled (always on)"
 echo "    Hubble UI:              $HUBBLE_ENABLED"
 echo ""
 
@@ -82,7 +82,7 @@ echo "  Installing Cilium for Talos Linux..."
 CILIUM_CMD=(
     cilium
     install
-    --set "kubeProxyReplacement=$CILIUM_KUBE_PROXY_REPLACEMENT"
+    --set "kubeProxyReplacement=true"
     --set "bpf.masquerade=true"
     --set "ipam.mode=kubernetes"
     --set "securityContext.privileged=true"
@@ -113,15 +113,11 @@ kubectl wait --for=condition=ready pod -l k8s-app=cilium -n kube-system --timeou
     echo "  WARNING: Cilium pods not ready within timeout, checking status..."
 }
 
-# Handle kube-proxy based on configuration
-if [[ "$CILIUM_KUBE_PROXY_REPLACEMENT" == "true" ]]; then
-    echo "  Removing kube-proxy (replaced by Cilium BPF-based routing)..."
-    kubectl delete daemonset kube-proxy -n kube-system --ignore-not-found 2>/dev/null || true
-    kubectl delete pod -n kube-system -l k8s-app=kube-proxy --force --grace-period=0 --ignore-not-found 2>/dev/null || true
-    echo "  ✓ kube-proxy removed"
-else
-    echo "  Keeping kube-proxy (CILIUM_KUBE_PROXY_REPLACEMENT=false)"
-fi
+# Remove kube-proxy (always replaced by Cilium BPF-based routing)
+echo "  Removing kube-proxy (replaced by Cilium BPF-based routing)..."
+kubectl delete daemonset kube-proxy -n kube-system --ignore-not-found 2>/dev/null || true
+kubectl delete pod -n kube-system -l k8s-app=kube-proxy --force --grace-period=0 --ignore-not-found 2>/dev/null || true
+echo "  ✓ kube-proxy removed"
 
 # Enable Hubble CLI if available
 if [[ "$HUBBLE_ENABLED" == "true" ]]; then
@@ -180,11 +176,7 @@ if [[ "$HUBBLE_ENABLED" == "true" ]]; then
 fi
 
 echo ""
-if [[ "$CILIUM_KUBE_PROXY_REPLACEMENT" == "true" ]]; then
-    echo "  ✓ Cilium installed with kube-proxy replacement"
-else
-    echo "  ✓ Cilium installed (kube-proxy enabled)"
-fi
+echo "  ✓ Cilium installed with kube-proxy replacement"
 if [[ "$HUBBLE_ENABLED" == "true" ]]; then
     echo "  ✓ Hubble UI enabled for network observability"
 fi

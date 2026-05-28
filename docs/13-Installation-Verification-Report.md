@@ -36,7 +36,7 @@
 | eBPF Support | ✅ Verified | N/A | Kernel 6.19.8 |
 
 **Configuration**:
-- `CILIUM_KUBE_PROXY_REPLACEMENT=true`
+- kube-proxy replacement: enabled (always on)
 - `HUBBLE_ENABLED=true`
 
 **Result**: CNI fully operational, kube-proxy successfully removed

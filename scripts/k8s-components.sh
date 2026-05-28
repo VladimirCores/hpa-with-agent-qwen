@@ -42,6 +42,8 @@ CNI_CHOICE="cilium"
 LIST_COMPONENTS=false
 INSTALL_METRICS=false
 INSTALL_METALLB=false
+INSTALL_ISTIO=false
+INSTALL_ENVOY_GATEWAY=false
 
 while getopts "c:m-:" opt; do
     case $opt in
@@ -55,10 +57,12 @@ while getopts "c:m-:" opt; do
                 cni-flannel) CNI_CHOICE="flannel"; INSTALL_ALL=false ;;
                 with-metrics) INSTALL_METRICS=true ;;
                 with-metallb) INSTALL_METALLB=true ;;
+                with-istio) INSTALL_ISTIO=true; INSTALL_ENVOY_GATEWAY=true ;;
+                with-envoy-gateway) INSTALL_ENVOY_GATEWAY=true ;;
                 *) echo "Unknown option: --${OPTARG}"; exit 1 ;;
             esac
             ;;
-        *) echo "Usage: $0 [-c component] [-m] [--list] [--cni-cilium] [--cni-calico] [--cni-flannel] [--with-metrics] [--with-metallb]"; exit 1 ;;
+        *) echo "Usage: $0 [-c component] [-m] [--list] [--cni-cilium] [--cni-calico] [--cni-flannel] [--with-metrics] [--with-metallb] [--with-istio] [--with-envoy-gateway]"; exit 1 ;;
     esac
 done
 
@@ -75,6 +79,9 @@ if [[ "$LIST_COMPONENTS" == "true" ]]; then
     echo "    metrics-server  - Metrics Server - Resource metrics for HPA"
     echo "    metallb         - MetalLB LoadBalancer - External IP for Services"
     echo ""
+    echo "  Service Mesh (separate installation via istio-install.sh):"
+    echo "    istio           - Istio service mesh + Envoy Gateway"
+    echo ""
     echo "Usage:"
     echo "  $0                           # Install Cilium only (default)"
     echo "  $0 --cni-cilium              # Install Cilium only"
@@ -82,7 +89,9 @@ if [[ "$LIST_COMPONENTS" == "true" ]]; then
     echo "  $0 --cni-flannel             # Install Flannel only"
     echo "  $0 --with-metrics            # Install CNI + metrics-server"
     echo "  $0 --with-metallb            # Install CNI + MetalLB"
-    echo "  $0 --with-metrics --with-metallb  # Install all components"
+    echo "  $0 --with-metrics --with-metallb  # Install all core components"
+    echo "  $0 --with-istio              # Install core + Istio + Envoy Gateway"
+    echo "  $0 --with-envoy-gateway      # Install core + Envoy Gateway only"
     echo "  $0 -c metrics-server         # Install metrics-server only"
     echo "  $0 -c metallb                # Install MetalLB only"
     echo "  $0 --list                    # Show this help"
@@ -126,7 +135,6 @@ step_02_install_cni() {
     case "$CNI_CHOICE" in
         cilium)
             CILIUM_VERSION="$CILIUM_VERSION" \
-            CILIUM_KUBE_PROXY_REPLACEMENT="$CILIUM_KUBE_PROXY_REPLACEMENT" \
             HUBBLE_ENABLED="$HUBBLE_ENABLED" \
             CILIUM_HUBBLE_RELAY_ENABLED="$CILIUM_HUBBLE_RELAY_ENABLED" \
             bash "$STEPS_DIR/02-install-cilium.sh"
@@ -159,6 +167,11 @@ step_04_install_metallb() {
 
 step_05_verify() {
     bash "$STEPS_DIR/05-verify-installation.sh" "$CNI_CHOICE" "$INSTALL_METRICS" "$INSTALL_METALLB"
+}
+
+step_06_install_istio() {
+    echo "  Delegating to istio-install.sh..."
+    bash "$SCRIPT_DIR/istio-install.sh"
 }
 
 # =============================================================================
@@ -218,6 +231,11 @@ if [[ "$INSTALL_ALL" == "true" ]] || [[ "$SPECIFIC_COMPONENT" != "" ]] || [[ "$I
     run_step_sync "05: Verify installation" "step_05_verify"
 fi
 
+# Step 06: Install Istio + Envoy Gateway (if requested)
+if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+    run_step_sync "06: Install Istio + Envoy Gateway" "step_06_install_istio"
+fi
+
 # =============================================================================
 # Summary
 # =============================================================================
@@ -230,8 +248,14 @@ if [[ "$INSTALL_METRICS" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-se
 fi
 if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
     echo "  ✓ MetalLB LoadBalancer"
-    if [[ -n "$ENVOY_GATEWAY_LB_IP" ]]; then
+    if [[ -n "$ENVOY_GATEWAY_LB_IP" ]] && [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
         echo "  ✓ Envoy Gateway dedicated IP: $ENVOY_GATEWAY_LB_IP"
+    fi
+fi
+if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+    echo "  ✓ Istio service mesh (istiod)"
+    if [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+        echo "  ✓ Envoy Gateway (Gateway API ingress)"
     fi
 fi
 echo ""
@@ -246,8 +270,17 @@ if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]
     echo "  2. Test LoadBalancer Service:"
     echo "     See: docs/09-MetalLB-LoadBalancer.md"
     echo ""
-    echo "  3. Install Istio with Envoy Gateway:"
+    echo "  3. Install Istio with Envoy Gateway (optional):"
     echo "     ./scripts/istio-install.sh"
+    echo ""
+fi
+if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+    echo "  2. Deploy sample application with Istio sidecar injection:"
+    echo "     kubectl label namespace default istio-injection=enabled"
+    echo "     kubectl apply -f docs/examples/sample-app.yaml"
+    echo ""
+    echo "  3. Access Envoy Gateway:"
+    echo "     http://$ENVOY_GATEWAY_LB_IP"
     echo ""
 fi
 echo "=== Components Installation Complete ==="

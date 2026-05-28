@@ -85,13 +85,31 @@ else
     echo "  ✓ Base image volume exists"
 fi
 
+# Function to discover a VM's disk volume in the storage pool (handles any extension)
+discover_vm_volume() {
+    local vm_name="$1"
+    local match_prefix="${VM_PREFIX}${vm_name}-vda"
+
+    virsh -c "$LIBVIRT_URI" vol-list --pool "$STORAGE_POOL" 2>/dev/null | \
+        awk -v prefix="$match_prefix" '$1 ~ prefix {print $1; exit}'
+}
+
 # Function to replace volume with CoW overlay
 replace_with_overlay() {
     local vm_name="$1"
-    local volume_name="${VM_PREFIX}${vm_name}-vda.qcow2"
+
+    # Discover actual volume name from the pool (handles .raw, .qcow2, .img, or no extension)
+    local volume_name
+    volume_name=$(discover_vm_volume "$vm_name")
+
+    if [[ -z "$volume_name" ]]; then
+        echo "  Volume not found: $vm_name (expected pattern: ${VM_PREFIX}${vm_name}-vda.*)"
+        return 1
+    fi
+
     local volume_path="$POOL_PATH/$volume_name"
     local temp_path="$POOL_PATH/${volume_name}.tmp"
-    
+
     # Determine disk size based on VM role
     local disk_size_gb
     if [[ "$vm_name" == "$MASTER_NAME" ]]; then
@@ -100,16 +118,10 @@ replace_with_overlay() {
         disk_size_gb="${WORKER_DISK:-20}"
     fi
 
-    # Check if volume exists
-    if ! virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$volume_name" &>/dev/null; then
-        echo "  Volume not found: $vm_name"
-        return 1
-    fi
-
     # Get volume info to check if it's already an overlay
     vol_info=$(virsh -c "$LIBVIRT_URI" vol-info --pool "$STORAGE_POOL" "$volume_name" 2>/dev/null)
     if echo "$vol_info" | grep -q "Backing file.*talos-base-image"; then
-        echo "  ✓ Already a CoW overlay: $vm_name"
+        echo "  ✓ Already a CoW overlay: $vm_name ($volume_name)"
         # Check if resize is needed
         local current_size=$(echo "$vol_info" | grep "Capacity:" | awk '{print $2}' | sed 's/GiB//')
         if (( $(echo "$current_size < $disk_size_gb" | bc -l 2>/dev/null || echo 0) )); then
@@ -120,14 +132,14 @@ replace_with_overlay() {
         return 0
     fi
 
-    echo "  Replacing with CoW overlay: $vm_name (size: ${disk_size_gb}G)"
+    echo "  Replacing with CoW overlay: $vm_name (volume: $volume_name, size: ${disk_size_gb}G)"
 
     # Move existing volume to temp
     run_sudo mv "$volume_path" "$temp_path"
 
     # Create CoW overlay with correct virtual size
     run_sudo qemu-img create -f qcow2 -F qcow2 -b "$POOL_PATH/$BASE_VOLUME_NAME" "$volume_path" "${disk_size_gb}G" >/dev/null 2>&1
-    
+
     if [[ $? -eq 0 ]]; then
         run_sudo chown qemu:kvm "$volume_path"
         run_sudo chmod 644 "$volume_path"

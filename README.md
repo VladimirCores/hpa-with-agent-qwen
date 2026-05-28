@@ -345,7 +345,7 @@ The dashboard provides web-based cluster monitoring, pod management, and resourc
 | `docs/01-Network-setup.md` | Network configuration |
 | `docs/02-Vagrant-VMs-provision.md` | VM provisioning |
 | `docs/03-Talos-Configuration.md` | Talos bootstrap |
-| `docs/04-Istio-Envoy-Gateway-Preview.md` | Istio installation |
+| `docs/04-Istio-Envoy-Gateway-Integration.md` | Istio + Envoy Gateway installation and integration |
 | `docs/05-Cilium-Setup.md` | Cilium CNI guide |
 | `docs/06-HPA-Study-Guide.md` | HPA examples and exercises |
 | `docs/07-User-Session-Mode.md` | User session mode |

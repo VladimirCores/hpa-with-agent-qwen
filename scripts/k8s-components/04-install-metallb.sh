@@ -38,10 +38,24 @@ validate_ip_pool() {
         echo "  ✓ IP pool size: $pool_size addresses"
     fi
 
+    # Helper: convert IP to comparable integer
+    ip_to_int() {
+        local ip="$1"
+        local a b c d
+        IFS='.' read -r a b c d <<< "$ip"
+        echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
+    }
+
+    local pool_start_int pool_end_int
+    pool_start_int=$(ip_to_int "$METALLB_IP_POOL_START")
+    pool_end_int=$(ip_to_int "$METALLB_IP_POOL_END")
+
     # Check for conflicts with static IPs
     local conflicts=0
     if [[ -n "${MASTER_IP:-}" ]]; then
-        if [[ "$MASTER_IP" >= "$METALLB_IP_POOL_START" && "$MASTER_IP" <= "$METALLB_IP_POOL_END" ]]; then
+        local master_ip_int
+        master_ip_int=$(ip_to_int "$MASTER_IP")
+        if [[ $master_ip_int -ge $pool_start_int && $master_ip_int -le $pool_end_int ]]; then
             echo "  ✗ Master IP $MASTER_IP conflicts with MetalLB pool"
             conflicts=1
         fi
@@ -50,7 +64,9 @@ validate_ip_pool() {
     # Check worker IPs
     for i in $(seq 1 $WORKER_COUNT); do
         WORKER_IP=$(echo "$WORKER_IP_BASE" | awk -F. -v n="$((i-1))" '{print $1"."$2"."$3"."$4+n}')
-        if [[ "$WORKER_IP" >= "$METALLB_IP_POOL_START" && "$WORKER_IP" <= "$METALLB_IP_POOL_END" ]]; then
+        local worker_ip_int
+        worker_ip_int=$(ip_to_int "$WORKER_IP")
+        if [[ $worker_ip_int -ge $pool_start_int && $worker_ip_int -le $pool_end_int ]]; then
             echo "  ✗ Worker IP $WORKER_IP conflicts with MetalLB pool"
             conflicts=1
         fi
