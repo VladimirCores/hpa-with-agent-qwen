@@ -30,7 +30,7 @@ CILIUM_KUBE_PROXY_REPLACEMENT=true
 # Hubble UI - Network observability
 # Default: true (Hubble UI enabled for network flow monitoring)
 # Set to false to disable Hubble and reduce resource usage
-CILIUM_HUBBLE_ENABLED=true
+HUBBLE_ENABLED=true
 
 # Hubble Relay - gRPC API for Hubble data
 # Required for Hubble UI and CLI
@@ -74,7 +74,7 @@ When `CILIUM_KUBE_PROXY_REPLACEMENT=false`:
 
 ### Enabled by Default
 
-When `CILIUM_HUBBLE_ENABLED=true`:
+When `HUBBLE_ENABLED=true`:
 
 **Features:**
 - 🔍 Network flow visualization
@@ -118,7 +118,7 @@ kubectl port-forward -n kube-system svc/hubble-ui 8080:80
 
 ### Disabled
 
-When `CILIUM_HUBBLE_ENABLED=false`:
+When `HUBBLE_ENABLED=false`:
 
 **Benefits:**
 - Reduced resource usage (~200MB memory saved)
@@ -228,7 +228,7 @@ CILIUM_KUBE_PROXY_REPLACEMENT=false
 
 ```bash
 # 1. Update .env
-CILIUM_HUBBLE_ENABLED=false
+HUBBLE_ENABLED=false
 
 # 2. Reinstall Cilium
 ./scripts/k8s-components.sh --cni-cilium

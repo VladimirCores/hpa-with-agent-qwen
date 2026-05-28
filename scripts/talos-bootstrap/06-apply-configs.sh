@@ -30,12 +30,17 @@ apply_worker_config() {
 
     echo "  Checking $node_name ($node_ip) state..."
 
-    local version_output
-    version_output=$(talosctl version --nodes "$node_ip" --endpoints "$node_ip" --insecure 2>&1 || true)
+    # First check if node is in maintenance mode (no config applied)
+    local MAINTENANCE=false
+    if version_output=$(talosctl version --nodes "$node_ip" --endpoints "$node_ip" --insecure 2>&1); then
+        if echo "$version_output" | grep -q "Tag:"; then
+            MAINTENANCE=true
+            echo "  ✓ Node is in maintenance mode"
+        fi
+    fi
 
-    if echo "$version_output" | grep -q "Tag:"; then
-        echo "  ✓ Node is in maintenance mode"
-
+    if [[ "$MAINTENANCE" == "true" ]]; then
+        # Apply config via maintenance mode API
         if talosctl apply-config --nodes "$node_ip" --endpoints "$node_ip" --insecure --file "$CONFIG_DIR/worker.yaml" 2>&1; then
             echo "  ✓ Worker config applied"
             return 0
@@ -43,26 +48,19 @@ apply_worker_config() {
             echo "  ERROR: Failed to apply config"
             return 1
         fi
+    else
+        # Node is already configured (RBAC enabled, requires talosconfig)
+        echo "  Node $node_name is already configured (not in maintenance mode)"
+        echo "  Skipping config apply (config was already applied previously)"
 
-    elif echo "$version_output" | grep -q "certificate signed by unknown authority"; then
-        echo "  Node has TLS errors (may already be configured)"
-        echo "  Attempting config apply with --insecure anyway..."
-
-        if talosctl apply-config --nodes "$node_ip" --endpoints "$node_ip" --insecure --file "$CONFIG_DIR/worker.yaml" 2>&1; then
-            echo "  ✓ Worker config applied"
+        # Verify connectivity via talosconfig
+        if talosctl version --nodes "$node_ip" --endpoints "$MASTER_IP" --talosconfig "$TALOSCONFIG" 2>&1 | grep -q "Tag:"; then
+            echo "  ✓ Talos API accessible via talosconfig"
             return 0
         else
-            echo "  WARNING: Config apply failed. Node might already have config applied."
-            echo "  Skipping for now."
+            echo "  WARNING: Could not verify Talos API connectivity"
             return 0
         fi
-
-    else
-        echo "  WARNING: Unexpected response from node"
-        echo "  Response: $(echo "$version_output" | head -3)"
-        echo "  Attempting config apply anyway..."
-        talosctl apply-config --nodes "$node_ip" --endpoints "$node_ip" --insecure --file "$CONFIG_DIR/worker.yaml" 2>&1 || true
-        return 0
     fi
 }
 

@@ -23,75 +23,117 @@ if [[ ! -f "$CONFIG_DIR/talosconfig" ]]; then
 fi
 
 # ──────────────────────────────────────────────
-# Phase 1: Apply controlplane config via maintenance mode API
+# Phase 1: Detect node state and apply/verify config
 # ──────────────────────────────────────────────
 echo ""
-echo "  ── Phase 1: Apply controlplane config ──"
-echo "  Node $MASTER_NAME ($MASTER_IP) is in maintenance mode"
-echo "  Applying controlplane config..."
+echo "  ── Phase 1: Check node state ──"
 
-APPLY_SUCCESS=false
-for attempt in 1 2 3; do
-    echo "  Config apply attempt $attempt..."
-    if talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1; then
-        echo "  ✓ Controlplane config applied successfully"
-        APPLY_SUCCESS=true
-        break
-    else
-        echo "  Attempt $attempt failed"
-        if [[ $attempt -lt 3 ]]; then
-            echo "  Waiting 10s before retry..."
-            sleep 10
-        fi
-    fi
-done
-
-if [[ "$APPLY_SUCCESS" != "true" ]]; then
-    echo "  ERROR: Failed to apply controlplane config"
-    exit 1
-fi
-
-# ──────────────────────────────────────────────
-# Phase 2: Wait for node to reboot with new config
-# ──────────────────────────────────────────────
-echo ""
-echo "  ── Phase 2: Wait for node reboot ──"
-echo "  Node will reboot automatically after config is applied"
-echo "  Waiting for node to come back online..."
-
-REBOOT_WAIT=0
-REBOOT_TIMEOUT=180  # 3 minutes for reboot
-NODE_BACK=false
-
-while [[ $REBOOT_WAIT -lt $REBOOT_TIMEOUT ]]; do
-    # After reboot, node will have certs from the applied config.
-    # Use talosconfig (maintenance mode API is no longer available).
-    version_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
-
+# Check if node is in maintenance mode (no config applied yet)
+NODE_IN_MAINTENANCE=false
+if version_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure 2>&1); then
     if echo "$version_output" | grep -q "Tag:"; then
-        echo "  ✓ Node is back online (${REBOOT_WAIT}s)"
-        NODE_BACK=true
-        break
+        NODE_IN_MAINTENANCE=true
+        echo "  Node $MASTER_NAME ($MASTER_IP) is in maintenance mode"
     fi
-
-    # Show progress periodically
-    if [[ $((REBOOT_WAIT % 15)) -eq 0 ]]; then
-        echo "    Waiting for node... (${REBOOT_WAIT}s)"
-    fi
-
-    sleep 5
-    REBOOT_WAIT=$((REBOOT_WAIT + 5))
-done
-
-if [[ "$NODE_BACK" != "true" ]]; then
-    echo "  ERROR: Node did not come back online after ${REBOOT_TIMEOUT}s"
-    echo "  Check VM console for boot errors"
-    exit 1
 fi
 
-# Additional stabilization time after reboot
-echo "  Allowing node to stabilize..."
-sleep 15
+if [[ "$NODE_IN_MAINTENANCE" == "true" ]]; then
+    # ── Apply config via maintenance mode API (--insecure) ──
+    echo ""
+    echo "  ── Phase 1a: Apply controlplane config ──"
+    echo "  Applying controlplane config..."
+
+    APPLY_SUCCESS=false
+    for attempt in 1 2 3; do
+        echo "  Config apply attempt $attempt..."
+        if talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --insecure --file "$CONFIG_DIR/controlplane.yaml" 2>&1; then
+            echo "  ✓ Controlplane config applied successfully"
+            APPLY_SUCCESS=true
+            break
+        else
+            echo "  Attempt $attempt failed"
+            if [[ $attempt -lt 3 ]]; then
+                echo "  Waiting 10s before retry..."
+                sleep 10
+            fi
+        fi
+    done
+
+    if [[ "$APPLY_SUCCESS" != "true" ]]; then
+        echo "  ERROR: Failed to apply controlplane config"
+        echo ""
+        echo "  Possible causes:"
+        echo "    1. Local registry not accessible (verify: ./scripts/verify-local-registry.sh)"
+        echo "    2. Installer image not found in registry"
+        echo "    3. Network issue between VM and host"
+        echo ""
+        echo "  Troubleshooting:"
+        echo "    Check registry: curl -s http://${NETWORK_IP}:5000/v2/_catalog"
+        echo "    Check VM console: virsh -c $LIBVIRT_URI console ${VM_PREFIX:-}${MASTER_NAME}"
+        exit 1
+    fi
+else
+    # ── Node is already configured — skipping apply-config ──
+    echo "  Node $MASTER_NAME ($MASTER_IP) is already configured (not in maintenance mode)"
+    echo "  Skipping config apply (config was already applied previously)"
+    echo ""
+    echo "  Verifying Talos API connectivity..."
+    if talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 | grep -q "Tag:"; then
+        echo "  ✓ Talos API accessible with talosconfig"
+    else
+        echo "  WARNING: Could not verify Talos API — attempting apply-config anyway"
+        # Last resort: try apply-config with talosconfig (works on some Talos versions)
+        talosctl apply-config --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" --file "$CONFIG_DIR/controlplane.yaml" 2>&1 || true
+    fi
+fi
+
+# ──────────────────────────────────────────────
+# Phase 2: Wait for node to reboot (if config was applied)
+# ──────────────────────────────────────────────
+if [[ "$NODE_IN_MAINTENANCE" == "true" ]]; then
+    echo ""
+    echo "  ── Phase 2: Wait for node reboot ──"
+    echo "  Node will reboot automatically after config is applied"
+    echo "  Waiting for node to come back online..."
+
+    REBOOT_WAIT=0
+    REBOOT_TIMEOUT=180  # 3 minutes for reboot
+    NODE_BACK=false
+
+    while [[ $REBOOT_WAIT -lt $REBOOT_TIMEOUT ]]; do
+        # After reboot, node will have certs from the applied config.
+        # Use talosconfig (maintenance mode API is no longer available).
+        version_output=$(talosctl version --nodes "$MASTER_IP" --endpoints "$MASTER_IP" --talosconfig "$CONFIG_DIR/talosconfig" 2>&1 || true)
+
+        if echo "$version_output" | grep -q "Tag:"; then
+            echo "  ✓ Node is back online (${REBOOT_WAIT}s)"
+            NODE_BACK=true
+            break
+        fi
+
+        # Show progress periodically
+        if [[ $((REBOOT_WAIT % 15)) -eq 0 ]]; then
+            echo "    Waiting for node... (${REBOOT_WAIT}s)"
+        fi
+
+        sleep 5
+        REBOOT_WAIT=$((REBOOT_WAIT + 5))
+    done
+
+    if [[ "$NODE_BACK" != "true" ]]; then
+        echo "  ERROR: Node did not come back online after ${REBOOT_TIMEOUT}s"
+        echo "  Check VM console for boot errors"
+        exit 1
+    fi
+
+    # Additional stabilization time after reboot
+    echo "  Allowing node to stabilize..."
+    sleep 15
+else
+    echo ""
+    echo "  ── Phase 2: Skip reboot wait ──"
+    echo "  Node already running with config, no reboot needed"
+fi
 
 # ──────────────────────────────────────────────
 # Phase 3: Bootstrap cluster (no --insecure)

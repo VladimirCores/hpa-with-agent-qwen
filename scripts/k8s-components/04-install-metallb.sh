@@ -305,9 +305,9 @@ echo ""
 # =============================================================================
 # Expose Hubble UI via MetalLB LoadBalancer
 # =============================================================================
-if [[ "$EXPOSE_HUBBLE_UI" == "true" ]]; then
+if [[ "$HUBBLE_ENABLED" == "true" ]] && [[ "$EXPOSE_HUBBLE_UI" == "true" ]]; then
     echo "  Exposing Hubble UI via MetalLB LoadBalancer..."
-    
+
     # Check if Hubble UI service exists
     if kubectl get svc hubble-ui -n kube-system &>/dev/null; then
         # Build LoadBalancer service patch
@@ -338,7 +338,7 @@ if [[ "$EXPOSE_HUBBLE_UI" == "true" ]]; then
         fi
     else
         echo "  ⚠ Hubble UI service not found (Hubble may not be installed)"
-        echo "    Enable Hubble: CILIUM_HUBBLE_ENABLED=true in .env"
+        echo "    Enable Hubble: HUBBLE_ENABLED=true in .env"
     fi
     echo ""
 fi
@@ -394,7 +394,7 @@ if [[ "$EXPOSE_HUBBLE_UI" == "true" ]] || [[ "$EXPOSE_K8S_DASHBOARD" == "true" ]
     echo "═══════════════════════════════════════════════════════════"
     echo ""
     
-    if [[ "$EXPOSE_HUBBLE_UI" == "true" ]]; then
+    if [[ "$HUBBLE_ENABLED" == "true" ]] && [[ "$EXPOSE_HUBBLE_UI" == "true" ]]; then
         HUBBLE_IP=$(kubectl get svc hubble-ui -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
         echo "  Hubble UI (Network Observability):"
         echo "    URL: http://$HUBBLE_IP"

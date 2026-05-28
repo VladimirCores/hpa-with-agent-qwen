@@ -431,3 +431,13 @@ mkdir -p .vagrant/raw-disks
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
 - [Podman Registry](https://docs.podman.io/)
 - [Local Registry Guide](docs/16-Local-Registry-Guide.md)
+
+When asked to commit changes, do exactly that: stage all changes, write a descriptive conventional-commit message, and commit. Do NOT explore the codebase, debug VMs, or investigate other issues unless the user explicitly asks for it alongside the commit.
+
+When user says 'continue from last session' or 'resume previous work', first read memory files from ~/.qwen/memory/ or the project root, and if not found, ask the user for the exact file path rather than guessing multiple incorrect paths.
+
+Before running any shell command that might modify the system (especially libvirt, vagrant, sudo, qemu-img, virsh), first check the current state with read-only commands to avoid accidental deletions or conflicting state assumptions.
+
+When the user provides a task that involves fixing scripts or infrastructure, start with a minimal, targeted fix rather than restructuring the entire codebase or moving code to external files.
+
+If you cannot process an image or file the user provides, clearly state your limitation and ask for a text alternative (typed URL, description, or pasted content) rather than repeatedly failing.
