@@ -49,5 +49,11 @@ export CONFIG_DIR
 export CERTS_DIR
 export SECRETS_FILE
 
+# Source shared logging library
+LOGGING_SCRIPT="$PROJECT_ROOT/scripts/logging.sh"
+if [[ -f "$LOGGING_SCRIPT" ]]; then
+    source "$LOGGING_SCRIPT"
+fi
+
 # Set TALOSCONFIG environment variable for talosctl commands
 export TALOSCONFIG="$CONFIG_DIR/talosconfig"

@@ -101,6 +101,12 @@ export K8S_DASHBOARD_LB_IP
 export ENVOY_GATEWAY_LB_IP
 export DEFAULT_KUBECONFIG
 
+# Source shared logging library
+LOGGING_SCRIPT="$PROJECT_ROOT/scripts/logging.sh"
+if [[ -f "$LOGGING_SCRIPT" ]]; then
+    source "$LOGGING_SCRIPT"
+fi
+
 # Export Istio + Envoy Gateway variables
 export ISTIO_VERSION
 export ISTIO_NAMESPACE

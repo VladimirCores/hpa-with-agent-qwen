@@ -42,6 +42,12 @@ KIALA_ENABLED="${KIALA_ENABLED:-false}"
 # Kubeconfig
 DEFAULT_KUBECONFIG="$PROJECT_ROOT/talos-cluster/kubeconfig"
 
+# Source shared logging library
+LOGGING_SCRIPT="$PROJECT_ROOT/scripts/logging.sh"
+if [[ -f "$LOGGING_SCRIPT" ]]; then
+    source "$LOGGING_SCRIPT"
+fi
+
 # Export common variables
 export STEP_DIR
 export PROJECT_ROOT

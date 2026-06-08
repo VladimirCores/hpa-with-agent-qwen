@@ -13,6 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 STEPS_DIR="$SCRIPT_DIR/istio"
 
+# Source shared logging library
+source "$PROJECT_ROOT/scripts/logging.sh"
+
 # Source .env file
 set -a
 source "$PROJECT_ROOT/.env"
@@ -47,17 +50,16 @@ done
 # =============================================================================
 # Main Script
 # =============================================================================
-echo "=== Istio + Envoy Gateway Installation ==="
-echo ""
-echo "Configuration:"
-echo "  Istio version:          $ISTIO_VERSION"
-echo "  Istio namespace:        $ISTIO_NAMESPACE"
-echo "  Envoy Gateway version:  $ENVOY_GATEWAY_VERSION"
-echo "  Envoy Gateway IP:       $ENVOY_GATEWAY_LB_IP"
-echo "  Envoy Gateway replicas: $ENVOY_GATEWAY_REPLICAS"
-echo "  Istio ingress enabled:  $ISTIO_INGRESS_ENABLED"
-echo "  Kiali enabled:          $KIALA_ENABLED"
-echo ""
+log HEADER "Istio + Envoy Gateway Installation"
+
+log INFO "Configuration:"
+log INFO "  Istio version:          $ISTIO_VERSION"
+log INFO "  Istio namespace:        $ISTIO_NAMESPACE"
+log INFO "  Envoy Gateway version:  $ENVOY_GATEWAY_VERSION"
+log INFO "  Envoy Gateway IP:       $ENVOY_GATEWAY_LB_IP"
+log INFO "  Envoy Gateway replicas: $ENVOY_GATEWAY_REPLICAS"
+log INFO "  Istio ingress enabled:  $ISTIO_INGRESS_ENABLED"
+log INFO "  Kiali enabled:          $KIALA_ENABLED"
 
 # =============================================================================
 # Step Functions
@@ -115,17 +117,12 @@ run_step() {
     local step_name="$1"
     local step_func="$2"
 
-    echo "───────────────────────────────────────────────────────"
-    echo "  Step: $step_name"
-    echo "───────────────────────────────────────────────────────"
+    log STEP "$step_name"
 
     if $step_func; then
-        echo "  ✓ Completed: $step_name"
+        log OK "Completed: $step_name"
     else
-        echo ""
-        echo "═══════════════════════════════════════════════════════════"
-        echo "  Installation failed at: $step_name"
-        echo "═══════════════════════════════════════════════════════════"
+        log ERROR "Installation failed at: $step_name"
         echo ""
         echo "Troubleshooting:"
         echo "  1. Check the error message above"
@@ -135,7 +132,6 @@ run_step() {
         echo ""
         exit 1
     fi
-    echo ""
 }
 
 # =============================================================================
@@ -152,43 +148,37 @@ run_step "06: Install Kiali (optional)"                         "step_06_install
 if [[ "$SKIP_VERIFY" != "true" ]]; then
     run_step "07: Verify installation"                          "step_07_verify"
 else
-    echo "───────────────────────────────────────────────────────"
-    echo "  Step 07: Verify installation (skipped)"
-    echo "───────────────────────────────────────────────────────"
-    echo ""
+    log STEP "07: Verify installation (skipped)"
 fi
 
 # =============================================================================
 # Summary
 # =============================================================================
-echo "═══════════════════════════════════════════════════════════"
-echo "  Installation Complete"
-echo "═══════════════════════════════════════════════════════════"
-echo ""
-echo "Installed components:"
-echo "  ✓ Istio (istiod) — Service mesh control plane"
-echo "  ✓ Envoy Gateway — Ingress gateway (Gateway API)"
+log HEADER "Installation Complete"
+
+log INFO "Installed components:"
+log INFO "  ✓ Istio (istiod) — Service mesh control plane"
+log INFO "  ✓ Envoy Gateway — Ingress gateway (Gateway API)"
 if [[ "$KIALA_ENABLED" == "true" ]]; then
-    echo "  ✓ Kiali — Service mesh visualization"
+    log INFO "  ✓ Kiali — Service mesh visualization"
 fi
-echo ""
-echo "Access:"
-echo "  Envoy Gateway (via MetalLB):  http://$ENVOY_GATEWAY_LB_IP"
-echo "  Kiali:                        kubectl port-forward -n $ISTIO_NAMESPACE svc/kiali 20001:20001"
-echo ""
-echo "Configuration: $PROJECT_ROOT/.env"
-echo ""
-echo "Next steps:"
-echo "  1. Deploy sample application with sidecar injection:"
-echo "     kubectl create ns sample-app"
-echo "     kubectl label ns sample-app istio-injection=enabled"
-echo "     kubectl -n sample-app apply -f docs/examples/sample-app.yaml"
-echo ""
-echo "  2. Create HTTPRoute to expose via Envoy Gateway:"
-echo "     See docs/04-Istio-Envoy-Gateway-Integration.md"
-echo ""
-echo "  3. Configure HPA:"
-echo "     kubectl -n sample-app autoscale deployment my-app --cpu-percent=50 --min=1 --max=10"
-echo ""
-echo "=== Istio + Envoy Gateway Installation Complete ==="
-echo ""
+log INFO ""
+log INFO "Access:"
+log INFO "  Envoy Gateway (via MetalLB):  http://$ENVOY_GATEWAY_LB_IP"
+log INFO "  Kiali:                        kubectl port-forward -n $ISTIO_NAMESPACE svc/kiali 20001:20001"
+log INFO ""
+log INFO "Configuration: $PROJECT_ROOT/.env"
+log INFO ""
+log INFO "Next steps:"
+log INFO "  1. Deploy sample application with sidecar injection:"
+log INFO "     kubectl create ns sample-app"
+log INFO "     kubectl label ns sample-app istio-injection=enabled"
+log INFO "     kubectl -n sample-app apply -f docs/examples/sample-app.yaml"
+log INFO ""
+log INFO "  2. Create HTTPRoute to expose via Envoy Gateway:"
+log INFO "     See docs/04-Istio-Envoy-Gateway-Integration.md"
+log INFO ""
+log INFO "  3. Configure HPA:"
+log INFO "     kubectl -n sample-app autoscale deployment my-app --cpu-percent=50 --min=1 --max=10"
+
+log OK "Istio + Envoy Gateway Installation Complete"

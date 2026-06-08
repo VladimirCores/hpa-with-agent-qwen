@@ -18,6 +18,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 STEPS_DIR="$SCRIPT_DIR/k8s-components"
 
+# Source shared logging library
+source "$PROJECT_ROOT/scripts/logging.sh"
+
 # Source .env file
 set -a
 source "$PROJECT_ROOT/.env"
@@ -108,20 +111,19 @@ fi
 # =============================================================================
 # Main Script
 # =============================================================================
-echo "=== Kubernetes Components Installation ==="
-echo ""
-echo "Configuration:"
-echo "  CNI:            $CNI_CHOICE"
-echo "  Metrics Server: $INSTALL_METRICS"
-echo "  MetalLB:        $INSTALL_METALLB"
+log HEADER "Kubernetes Components Installation"
+
+log INFO "Configuration:"
+log INFO "  CNI:            $CNI_CHOICE"
+log INFO "  Metrics Server: $INSTALL_METRICS"
+log INFO "  MetalLB:        $INSTALL_METALLB"
 if [[ "$INSTALL_METALLB" == "true" ]]; then
-    echo "  IP Pool:        $METALLB_IP_POOL_START-$METALLB_IP_POOL_END"
-    echo "  Mode:           $METALLB_MODE"
+    log INFO "  IP Pool:        $METALLB_IP_POOL_START-$METALLB_IP_POOL_END"
+    log INFO "  Mode:           $METALLB_MODE"
     if [[ -n "$ENVOY_GATEWAY_LB_IP" ]]; then
-        echo "  Envoy GW IP:    $ENVOY_GATEWAY_LB_IP"
+        log INFO "  Envoy GW IP:    $ENVOY_GATEWAY_LB_IP"
     fi
 fi
-echo ""
 
 # =============================================================================
 # Step Functions
@@ -170,7 +172,7 @@ step_05_verify() {
 }
 
 step_06_install_istio() {
-    echo "  Delegating to istio-install.sh..."
+    log INFO "Delegating to istio-install.sh..."
     bash "$SCRIPT_DIR/istio-install.sh"
 }
 
@@ -182,16 +184,14 @@ run_step_sync() {
     local step_name="$1"
     local step_func="$2"
 
-    echo "Starting: $step_name"
+    log STEP "$step_name"
 
     if $step_func; then
-        echo "  ✓ Completed"
+        log OK "Completed"
     else
-        echo "  ✗ Failed"
+        log ERROR "Failed"
         echo ""
-        echo "═══════════════════════════════════════════════════════════"
-        echo "  Installation failed at: $step_name"
-        echo "═══════════════════════════════════════════════════════════"
+        log ERROR "Installation failed at: $step_name"
         echo ""
         echo "Troubleshooting:"
         echo "  1. Check the error message above"
@@ -200,7 +200,6 @@ run_step_sync() {
         echo ""
         exit 1
     fi
-    echo ""
 }
 
 # =============================================================================
@@ -239,49 +238,48 @@ fi
 # =============================================================================
 # Summary
 # =============================================================================
-echo "=== Installation Summary ==="
-echo ""
-echo "Installed components:"
-echo "  ✓ $CNI_CHOICE CNI"
-if [[ "$INSTALL_METRICS" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
-    echo "  ✓ metrics-server"
-fi
-if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
-    echo "  ✓ MetalLB LoadBalancer"
-    if [[ -n "$ENVOY_GATEWAY_LB_IP" ]] && [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
-        echo "  ✓ Envoy Gateway dedicated IP: $ENVOY_GATEWAY_LB_IP"
-    fi
-fi
-if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
-    echo "  ✓ Istio service mesh (istiod)"
-    if [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
-        echo "  ✓ Envoy Gateway (Gateway API ingress)"
-    fi
-fi
-echo ""
-echo "Configuration files: $PROJECT_ROOT/.env"
-echo ""
-echo "Next steps:"
-echo "  1. Verify cluster:"
-echo "     kubectl get nodes"
-echo "     kubectl get pods -A"
-echo ""
-if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
-    echo "  2. Test LoadBalancer Service:"
-    echo "     See: docs/09-MetalLB-LoadBalancer.md"
-    echo ""
-    echo "  3. Install Istio with Envoy Gateway (optional):"
-    echo "     ./scripts/istio-install.sh"
-    echo ""
-fi
-if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
-    echo "  2. Deploy sample application with Istio sidecar injection:"
-    echo "     kubectl label namespace default istio-injection=enabled"
-    echo "     kubectl apply -f docs/examples/sample-app.yaml"
-    echo ""
-    echo "  3. Access Envoy Gateway:"
-    echo "     http://$ENVOY_GATEWAY_LB_IP"
-    echo ""
-fi
-echo "=== Components Installation Complete ==="
+log HEADER "Installation Summary"
 
+log INFO "Installed components:"
+log INFO "  ✓ $CNI_CHOICE CNI"
+if [[ "$INSTALL_METRICS" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metrics-server" ]]; then
+    log INFO "  ✓ metrics-server"
+fi
+if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
+    log INFO "  ✓ MetalLB LoadBalancer"
+    if [[ -n "$ENVOY_GATEWAY_LB_IP" ]] && [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+        log INFO "  ✓ Envoy Gateway dedicated IP: $ENVOY_GATEWAY_LB_IP"
+    fi
+fi
+if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+    log INFO "  ✓ Istio service mesh (istiod)"
+    if [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+        log INFO "  ✓ Envoy Gateway (Gateway API ingress)"
+    fi
+fi
+log INFO ""
+log INFO "Configuration files: $PROJECT_ROOT/.env"
+log INFO ""
+log INFO "Next steps:"
+log INFO "  1. Verify cluster:"
+log INFO "     kubectl get nodes"
+log INFO "     kubectl get pods -A"
+if [[ "$INSTALL_METALLB" == "true" ]] || [[ "$SPECIFIC_COMPONENT" == "metallb" ]]; then
+    log INFO ""
+    log INFO "  2. Test LoadBalancer Service:"
+    log INFO "     See: docs/09-MetalLB-LoadBalancer.md"
+    log INFO ""
+    log INFO "  3. Install Istio with Envoy Gateway (optional):"
+    log INFO "     ./scripts/istio-install.sh"
+fi
+if [[ "$INSTALL_ISTIO" == "true" ]] || [[ "$INSTALL_ENVOY_GATEWAY" == "true" ]]; then
+    log INFO ""
+    log INFO "  2. Deploy sample application with Istio sidecar injection:"
+    log INFO "     kubectl label namespace default istio-injection=enabled"
+    log INFO "     kubectl apply -f docs/examples/sample-app.yaml"
+    log INFO ""
+    log INFO "  3. Access Envoy Gateway:"
+    log INFO "     http://$ENVOY_GATEWAY_LB_IP"
+fi
+
+log OK "Components Installation Complete"

@@ -13,13 +13,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 STEPS_DIR="$SCRIPT_DIR/talos-bootstrap"
 
+# Source shared logging library
+source "$PROJECT_ROOT/scripts/logging.sh"
+
 # Source .env file
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
     set -a
     source "$PROJECT_ROOT/.env"
     set +a
 else
-    echo "ERROR: .env file not found in $PROJECT_ROOT" >&2
+    log ERROR ".env file not found in $PROJECT_ROOT"
     exit 1
 fi
 
@@ -44,12 +47,11 @@ fi
 # Export for step scripts
 export CLUSTER_NAME
 
-echo "=== Talos Cluster Bootstrap ==="
-echo "Cluster Name: $CLUSTER_NAME"
-echo "Master: $MASTER_IP"
-echo "Workers: $WORKER_COUNT nodes"
-echo "Talos Version: ${TALOS_VERSION:-v1.12}"
-echo ""
+log HEADER "Talos Cluster Bootstrap"
+log INFO "Cluster Name: $CLUSTER_NAME"
+log INFO "Master: $MASTER_IP"
+log INFO "Workers: $WORKER_COUNT nodes"
+log INFO "Talos Version: ${TALOS_VERSION:-v1.12}"
 
 # Define step functions
 step_01_check_prerequisites() {
@@ -95,23 +97,21 @@ step_10_cluster_verify() {
 }
 
 # Execute steps
-echo "Executing steps..."
-echo ""
+log INFO "Executing steps..."
 
 # Execute a step synchronously
 run_step_sync() {
     local step_name="$1"
     local step_func="$2"
 
-    echo "Starting: $step_name"
+    log STEP "$step_name"
 
     if $step_func; then
-        echo "  ✓ Completed"
+        log OK "Completed"
     else
-        echo "  ✗ Failed"
+        log ERROR "Failed"
         exit 1
     fi
-    echo ""
 }
 
 # Run all steps in sequence
@@ -127,29 +127,29 @@ run_step_sync "09: Install Kubernetes Dashboard" "step_09_install_dashboard"
 run_step_sync "10: Cluster verification" "step_10_cluster_verify"
 
 # Summary
-echo "=== Bootstrap Summary ==="
-echo "Cluster: $CLUSTER_NAME"
-echo "Endpoint: https://$MASTER_IP:6443"
-echo "Master: $MASTER_NAME ($MASTER_IP)"
-echo "Workers: $WORKER_COUNT nodes"
-echo ""
-echo "Configuration files: $CONFIG_DIR/"
-echo "  - secrets.yaml (reusable secrets bundle)"
-echo "  - controlplane.yaml"
-echo "  - worker.yaml"
-echo "  - talosconfig"
-echo "  - kubeconfig"
-echo ""
-echo "Next steps:"
-echo "  1. Access Kubernetes Dashboard:"
-echo "     kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443"
-echo "     Open: https://localhost:8443"
-echo "     Token: $CONFIG_DIR/dashboard-admin-token.txt"
-echo ""
-echo "  2. Install Kubernetes components:"
-echo "     ./scripts/k8s-components.sh"
-echo "  3. Verify cluster:"
-echo "     kubectl get nodes"
-echo "     kubectl get pods -A"
-echo ""
-echo "=== Bootstrap Complete ==="
+log HEADER "Bootstrap Summary"
+log INFO "Cluster: $CLUSTER_NAME"
+log INFO "Endpoint: https://$MASTER_IP:6443"
+log INFO "Master: $MASTER_NAME ($MASTER_IP)"
+log INFO "Workers: $WORKER_COUNT nodes"
+log INFO ""
+log INFO "Configuration files: $CONFIG_DIR/"
+log INFO "  - secrets.yaml (reusable secrets bundle)"
+log INFO "  - controlplane.yaml"
+log INFO "  - worker.yaml"
+log INFO "  - talosconfig"
+log INFO "  - kubeconfig"
+log INFO ""
+log INFO "Next steps:"
+log INFO "  1. Access Kubernetes Dashboard:"
+log INFO "     kubectl --kubeconfig $CONFIG_DIR/kubeconfig -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443"
+log INFO "     Open: https://localhost:8443"
+log INFO "     Token: $CONFIG_DIR/dashboard-admin-token.txt"
+log INFO ""
+log INFO "  2. Install Kubernetes components:"
+log INFO "     ./scripts/k8s-components.sh"
+log INFO "  3. Verify cluster:"
+log INFO "     kubectl get nodes"
+log INFO "     kubectl get pods -A"
+
+log OK "Bootstrap Complete"

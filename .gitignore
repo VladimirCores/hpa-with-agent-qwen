@@ -9,6 +9,9 @@ kubeconfig
 *.tmp
 *.swp
 
+# Startup log (workspace root)
+startup.log
+
 # Editors
 .vagrant/
 .vscode/

@@ -14,21 +14,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 STEPS_DIR="$SCRIPT_DIR/vms-startup"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Source shared logging library
+source "$PROJECT_ROOT/scripts/logging.sh"
 
 # Source .env file
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
-    echo -e "${BLUE}Loading configuration from .env file...${NC}"
-    
+    log INFO "Loading configuration from .env file..."
+
     # First, check for common syntax issues before sourcing
     env_errors=()
     line_num=0
-    
+
     # Check for unquoted angle brackets (common in ROOT_PASSWORD)
     # Only check non-comment lines that contain '=' and extract the value part
     while IFS=: read -r ln fullline; do
@@ -43,7 +39,7 @@ if [[ -f "$PROJECT_ROOT/.env" ]]; then
             env_errors+=("         Fix: Add quotes around the value, e.g., VAR=\"<value>\"")
         fi
     done < <(grep -n '^[^#]*=' "$PROJECT_ROOT/.env" 2>/dev/null || true)
-    
+
     # Check for unquoted spaces in values (only non-comment lines with '=')
     while IFS=: read -r ln fullline; do
         # Extract just the value part after '='
@@ -59,46 +55,44 @@ if [[ -f "$PROJECT_ROOT/.env" ]]; then
             env_errors+=("         Fix: Add quotes around the value, e.g., VAR=\"value with spaces\"")
         fi
     done < <(grep -n '^[^#]*=' "$PROJECT_ROOT/.env" 2>/dev/null || true)
-    
+
     if [[ ${#env_errors[@]} -gt 0 ]]; then
-        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${RED}  ERROR: Syntax issues detected in .env file${NC}"
-        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        log ERROR "Syntax issues detected in .env file"
         echo ""
         for error in "${env_errors[@]}"; do
-            echo -e "${RED}$error${NC}"
+            log ERROR "$error"
         done
         echo ""
-        echo -e "${YELLOW}Common causes:${NC}"
+        log WARN "Common causes:"
         echo "  • ROOT_PASSWORD contains unquoted special characters like < or >"
         echo "  • Other variables have unquoted spaces or special characters"
         echo ""
-        echo -e "${YELLOW}Solution:${NC}"
+        log WARN "Solution:"
         echo "  Edit .env and quote values with special characters:"
         echo "    ROOT_PASSWORD=\"<CHANGE_ME_SECURE_PASSWORD>\""
         echo ""
         exit 1
     fi
-    
+
     # Source the file if no errors found
     set -a
     source "$PROJECT_ROOT/.env"
     set +a
-    
+
     # Validate critical variables
     if [[ -z "${ROOT_PASSWORD:-}" ]]; then
-        echo -e "${YELLOW}⚠ WARNING: ROOT_PASSWORD is not set in .env${NC}"
+        log WARN "ROOT_PASSWORD is not set in .env"
         echo "  This may cause authentication issues later."
         echo "  Consider setting ROOT_PASSWORD in your .env file."
         echo ""
     else
-        echo -e "${GREEN}✓ ROOT_PASSWORD is configured${NC}"
+        log OK "ROOT_PASSWORD is configured"
     fi
-    
-    echo -e "${GREEN}✓ Configuration loaded successfully${NC}"
+
+    log OK "Configuration loaded successfully"
     echo ""
 else
-    echo -e "${RED}ERROR: .env file not found in $PROJECT_ROOT${NC}" >&2
+    log ERROR ".env file not found in $PROJECT_ROOT"
     echo ""
     echo "Solution:"
     echo "  1. Copy the example file: cp .env.example .env"
@@ -145,51 +139,25 @@ done
 # Helper Functions
 # =============================================================================
 
-print_header() {
-    echo ""
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-    echo ""
-}
-
-print_step() {
-    echo -e "${YELLOW}▶ Step $1: $2${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
 run_step() {
     local step_num="$1"
     local step_name="$2"
     local step_script="$3"
     shift 3
-    
-    print_step "$step_num" "$step_name"
-    
+
+    log STEP "Step $step_num: $step_name"
+
     if bash "$step_script" "$@"; then
-        print_success "$step_name completed"
+        log OK "$step_name completed"
         return 0
     else
-        print_error "$step_name failed"
+        log ERROR "$step_name failed"
         echo ""
-        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
-        echo -e "${RED}  Startup failed at step $step_num: $step_name${NC}"
-        echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+        log ERROR "Startup failed at step $step_num: $step_name"
         echo ""
         echo "Troubleshooting:"
         echo "  1. Check the error message above"
-        echo "  2. Review logs in /tmp/vms-startup.log"
+        echo "  2. Review logs in startup.log"
         echo "  3. Run with -v for verbose output"
         echo "  4. Fix the issue and re-run: $0"
         echo ""
@@ -200,14 +168,14 @@ run_step() {
 verify_step() {
     local step_name="$1"
     local verify_cmd="$2"
-    
-    echo "  Verifying: $step_name..."
-    
+
+    log INFO "Verifying: $step_name..."
+
     if eval "$verify_cmd" > /dev/null 2>&1; then
-        print_success "Verification passed: $step_name"
+        log OK "Verification passed: $step_name"
         return 0
     else
-        print_error "Verification failed: $step_name"
+        log ERROR "Verification failed: $step_name"
         return 1
     fi
 }
@@ -216,27 +184,26 @@ verify_step() {
 # Main Script
 # =============================================================================
 
-print_header "Talos Cluster VM Startup"
+log HEADER "Talos Cluster VM Startup"
 
-echo "Configuration:"
-echo "  LIBVIRT_URI:    $LIBVIRT_URI"
-echo "  NETWORK_NAME:   $NETWORK_NAME"
-echo "  FORWARD_MODE:   ${FORWARD_MODE:-nat}"
-echo "  MASTER_NAME:    $MASTER_NAME ($MASTER_IP)"
-echo "  WORKER_COUNT:   $WORKER_COUNT"
-echo "  USE_RAW_IMAGE:  ${USE_RAW_IMAGE:-false}"
-echo "  STORAGE_POOL:   $STORAGE_POOL"
-echo "  POOL_PATH:      ${POOL_PATH:-auto}"
-echo ""
-echo "Options:"
-echo "  SKIP_CLEANUP:   $SKIP_CLEANUP"
-echo "  FORCE_RESET:    $FORCE_RESET"
-echo "  VERBOSE:        $VERBOSE"
-echo ""
+log INFO "Configuration:"
+log INFO "  LIBVIRT_URI:    $LIBVIRT_URI"
+log INFO "  NETWORK_NAME:   $NETWORK_NAME"
+log INFO "  FORWARD_MODE:   ${FORWARD_MODE:-nat}"
+log INFO "  MASTER_NAME:    $MASTER_NAME ($MASTER_IP)"
+log INFO "  WORKER_COUNT:   $WORKER_COUNT"
+log INFO "  USE_RAW_IMAGE:  ${USE_RAW_IMAGE:-false}"
+log INFO "  STORAGE_POOL:   $STORAGE_POOL"
+log INFO "  POOL_PATH:      ${POOL_PATH:-auto}"
+log INFO ""
+log INFO "Options:"
+log INFO "  SKIP_CLEANUP:   $SKIP_CLEANUP"
+log INFO "  FORCE_RESET:    $FORCE_RESET"
+log INFO "  VERBOSE:        $VERBOSE"
 
 # Read confirmation for force reset
 if [[ "$FORCE_RESET" == "true" ]]; then
-    echo -e "${YELLOW}⚠ FORCE RESET MODE: This will destroy all VMs and disks!${NC}"
+    log WARN "FORCE RESET MODE: This will destroy all VMs and disks!"
     read -p "Continue? (yes/no): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo "Aborted."
@@ -247,7 +214,7 @@ fi
 # =============================================================================
 # Step 1: Check Prerequisites
 # =============================================================================
-print_header "Step 1/8: Check Prerequisites"
+log HEADER "Step 1/8: Check Prerequisites"
 
 run_step "1" "Checking prerequisites" "$STEPS_DIR/02-check-prerequisites.sh" \
     NETWORK_NAME="$NETWORK_NAME" \
@@ -262,7 +229,7 @@ run_step "1" "Checking prerequisites" "$STEPS_DIR/02-check-prerequisites.sh" \
 # =============================================================================
 # Step 2: Prepare Talos Image
 # =============================================================================
-print_header "Step 2/8: Prepare Talos Image"
+log HEADER "Step 2/8: Prepare Talos Image"
 
 if [[ "${USE_RAW_IMAGE:-false}" == "true" ]]; then
     run_step "2" "Preparing raw disk image" "$STEPS_DIR/03-prepare-raw-image.sh" \
@@ -278,82 +245,80 @@ fi
 # =============================================================================
 # Step 3: Create Storage Pool
 # =============================================================================
-print_header "Step 3/8: Create Storage Pool"
+log HEADER "Step 3/8: Create Storage Pool"
 
 run_step "3" "Creating storage pool" "$STEPS_DIR/04-create-storage-pool.sh" \
     STORAGE_POOL="$STORAGE_POOL" \
     LIBVIRT_URI="$LIBVIRT_URI"
 
 # Storage pool verification done in step script
-print_success "Storage pool verification passed (from step script)"
+log OK "Storage pool verification passed (from step script)"
 
 # =============================================================================
 # Step 4: Setup Network
 # =============================================================================
-print_header "Step 4/8: Setup Network"
+log HEADER "Step 4/8: Setup Network"
 
 run_step "4" "Setting up network" "$STEPS_DIR/05-setup-network.sh" \
     NETWORK_NAME="$NETWORK_NAME" \
     SCRIPT_DIR="$SCRIPT_DIR"
 
 # Network verification done in step script, skip duplicate check
-print_success "Network verification passed (from step script)"
+log OK "Network verification passed (from step script)"
 
 # =============================================================================
 # Step 5: Cleanup Existing VMs (if not skipped)
 # =============================================================================
 if [[ "$SKIP_CLEANUP" != "true" ]]; then
-    print_header "Step 5/8: Cleanup Existing VMs"
+    log HEADER "Step 5/8: Cleanup Existing VMs"
 
     # Export variables for the cleanup script subprocess
     export SKIP_CLEANUP NETWORK_NAME MASTER_NAME WORKER_COUNT WORKER_NAME_PREFIX STORAGE_POOL LIBVIRT_URI USE_RAW_IMAGE PROJECT_ROOT
-    
+
     run_step "5" "Cleaning up existing VMs" "$STEPS_DIR/06-cleanup-vms.sh"
     STEP5_RAN=true
 else
-    print_header "Step 5/8: Skip Cleanup (requested)"
-    print_success "Skipping VM cleanup"
+    log HEADER "Step 5/8: Skip Cleanup (requested)"
+    log OK "Skipping VM cleanup"
     STEP5_RAN=false
 fi
 
 # Verify step 5 actually removed VMs from libvirt (it may fail silently)
-echo ""
-echo "Verifying VMs are removed from libvirt..."
+log INFO "Verifying VMs are removed from libvirt..."
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
     actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1 || true)
     if [[ -n "$actual_vm" ]]; then
-        echo "  WARNING: $actual_vm still exists after step 5 cleanup"
+        log WARN "$actual_vm still exists after step 5 cleanup"
     fi
 done
-echo ""
 
 # =============================================================================
 # Step 6: Start VMs with Vagrant
 # =============================================================================
-print_header "Step 6/8: Start VMs"
+log HEADER "Step 6/8: Start VMs"
 
 cd "$PROJECT_ROOT"
 
 # Always remove any existing VMs from libvirt before vagrant up
 # Step 5 may have cleaned via vagrant but VMs can still exist in libvirt
-echo "Checking for existing VMs in libvirt..."
+log INFO "Checking for existing VMs in libvirt..."
 found_any=false
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
     actual_vm=$(virsh -c "$LIBVIRT_URI" list --all 2>/dev/null | grep "${VM_PREFIX}${vm}" | awk '{print $2}' | head -1 || true)
     if [[ -n "$actual_vm" ]]; then
         found_any=true
-        echo "  Found: $actual_vm - removing..."
-        
+        log INFO "Found: $actual_vm - removing..."
+
         # Stop the VM only if running
         vm_state=$(virsh -c "$LIBVIRT_URI" domstate "$actual_vm" 2>/dev/null)
         if [[ "$vm_state" == "running" ]]; then
             virsh -c "$LIBVIRT_URI" destroy "$actual_vm" >/dev/null 2>&1 || true
             sleep 1
         fi
-        
+
         # Undefine with all storage
         if virsh -c "$LIBVIRT_URI" undefine "$actual_vm" --remove-all-storage >/dev/null 2>&1; then
-            echo "    ✓ Removed VM and storage"
+            log OK "Removed VM and storage"
         else
             # Try to remove storage volumes manually
             disk_name="${actual_vm}-vda.raw"
@@ -367,41 +332,39 @@ for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
             sudo rm -f /var/lib/libvirt/qemu/nvram/${actual_vm}_VARS.fd 2>/dev/null || true
             # Undefine without storage removal
             virsh -c "$LIBVIRT_URI" undefine "$actual_vm" >/dev/null 2>&1 || true
-            echo "    ✓ Removed VM (cleaned up manually)"
+            log OK "Removed VM (cleaned up manually)"
         fi
     fi
 done
 
 if [[ "$found_any" == "true" ]]; then
-    echo "  ✓ All existing VMs removed from libvirt"
-    echo ""
+    log OK "All existing VMs removed from libvirt"
 fi
 
-echo "Starting VMs with Vagrant..."
+log INFO "Starting VMs with Vagrant..."
 if vagrant up --provider=libvirt 2>&1 | tee /tmp/vagrant-up.log; then
     # Check the actual exit status of vagrant up
     if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-        print_error "Vagrant failed to start VMs"
+        log ERROR "Vagrant failed to start VMs"
         echo ""
         echo "Check /tmp/vagrant-up.log for details"
         exit 1
     fi
-    print_success "VMs started successfully"
+    log OK "VMs started successfully"
 else
-    print_error "Vagrant failed to start VMs"
+    log ERROR "Vagrant failed to start VMs"
     echo ""
     echo "Check /tmp/vagrant-up.log for details"
     exit 1
 fi
 
 # Verify VMs are running
-echo ""
-echo "Verifying VMs..."
+log INFO "Verifying VMs..."
 for vm in "$MASTER_NAME" "${WORKER_NAME_PREFIX}1" "${WORKER_NAME_PREFIX}2"; do
     if virsh -c "$LIBVIRT_URI" domstate "${VM_PREFIX}$vm" 2>/dev/null | grep -q "running"; then
-        print_success "VM $vm is running"
+        log OK "VM $vm is running"
     else
-        print_error "VM $vm is not running"
+        log ERROR "VM $vm is not running"
         exit 1
     fi
 done
@@ -409,15 +372,14 @@ done
 # =============================================================================
 # Step 7: Configure UEFI (skipped - Talos works fine with BIOS boot)
 # =============================================================================
-print_header "Step 7/8: Skip UEFI Configuration"
+log HEADER "Step 7/8: Skip UEFI Configuration"
 
-print_success "UEFI configuration skipped (Talos works with BIOS boot)"
-echo ""
+log OK "UEFI configuration skipped (Talos works with BIOS boot)"
 
 # =============================================================================
 # Step 8: Wait for Talos to Boot
 # =============================================================================
-print_header "Step 8/8: Wait for Talos Boot"
+log HEADER "Step 8/8: Wait for Talos Boot"
 
 run_step "8" "Waiting for Talos boot" "$STEPS_DIR/08-wait-for-talos.sh" \
     MASTER_IP="$MASTER_IP" \
@@ -428,19 +390,18 @@ run_step "8" "Waiting for Talos boot" "$STEPS_DIR/08-wait-for-talos.sh" \
 # =============================================================================
 # Summary
 # =============================================================================
-print_header "Startup Complete"
+log HEADER "Startup Complete"
 
-echo -e "${GREEN}All VMs started successfully!${NC}"
-echo ""
-echo "Next steps:"
-echo "  1. Bootstrap Talos cluster:"
-echo "     ./scripts/talos-bootstrap.sh"
-echo ""
-echo "  2. Monitor VM status:"
-echo "     virsh -c $LIBVIRT_URI list"
-echo ""
-echo "  3. Access VM console (if needed):"
-echo "     virsh -c $LIBVIRT_URI console ${VM_PREFIX}$MASTER_NAME"
-echo ""
+log OK "All VMs started successfully!"
+log INFO ""
+log INFO "Next steps:"
+log INFO "  1. Bootstrap Talos cluster:"
+log INFO "     ./scripts/talos-bootstrap.sh"
+log INFO ""
+log INFO "  2. Monitor VM status:"
+log INFO "     virsh -c $LIBVIRT_URI list"
+log INFO ""
+log INFO "  3. Access VM console (if needed):"
+log INFO "     virsh -c $LIBVIRT_URI console ${VM_PREFIX}$MASTER_NAME"
 
 exit 0

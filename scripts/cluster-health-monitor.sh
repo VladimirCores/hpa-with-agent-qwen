@@ -16,37 +16,43 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-60}"  # seconds
 LOG_FILE="${LOG_FILE:-}"  # Optional log file
 PID_FILE="${PID_FILE:-/tmp/cluster-health-monitor.pid}"
 
-# Colors for output
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Source shared logging library
+LOGGING_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logging.sh"
+if [[ -f "$LOGGING_SCRIPT" ]]; then
+    source "$LOGGING_SCRIPT"
+fi
 
-# Logging functions
-log_info() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] INFO: $*"
-    echo -e "${BLUE}${msg}${NC}"
-    [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
-}
+# Logging functions (use shared log() if available, otherwise define locally)
+if declare -f log &>/dev/null; then
+    log_info()  { log INFO "$*"; }
+    log_warn()  { log WARN "$*"; }
+    log_error() { log ERROR "$*"; }
+    log_ok()    { log OK "$*"; }
+else
+    log_info() {
+        local msg="[$(date '+%Y-%m-%d %H:%M:%S')] INFO: $*"
+        echo -e "${BLUE}${msg}${NC}"
+        [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
+    }
 
-log_warn() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] WARN: $*"
-    echo -e "${YELLOW}${msg}${NC}"
-    [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
-}
+    log_warn() {
+        local msg="[$(date '+%Y-%m-%d %H:%M:%S')] WARN: $*"
+        echo -e "${YELLOW}${msg}${NC}"
+        [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
+    }
 
-log_error() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*"
-    echo -e "${RED}${msg}${NC}"
-    [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
-}
+    log_error() {
+        local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*"
+        echo -e "${RED}${msg}${NC}"
+        [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
+    }
 
-log_ok() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] OK: $*"
-    echo -e "${GREEN}${msg}${NC}"
-    [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
-}
+    log_ok() {
+        local msg="[$(date '+%Y-%m-%d %H:%M:%S')] OK: $*"
+        echo -e "${GREEN}${msg}${NC}"
+        [[ -n "$LOG_FILE" ]] && echo "$msg" >> "$LOG_FILE"
+    }
+fi
 
 # Check if kubectl is available
 check_kubectl() {

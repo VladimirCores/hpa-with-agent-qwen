@@ -23,13 +23,14 @@ BOOT_INTERVAL=5
 BOOT_ELAPSED=0
 VERBOSE="${VERBOSE:-false}"
 
-# Log file
-LOG_FILE="/tmp/vms-startup.log"
-log() {
-    local msg="[$(date '+%H:%M:%S')] $*"
-    echo "$msg"
-    echo "$msg" >> "$LOG_FILE" 2>/dev/null || true
-}
+# Use shared logging library (sourced via 00-setup.sh)
+# If log() is not available (e.g. sourced directly), define a fallback
+if ! declare -f log &>/dev/null; then
+    log() {
+        local msg="$*"
+        echo "$msg"
+    }
+fi
 
 # ============================================================================
 # Helper Functions

@@ -46,6 +46,12 @@ export STORAGE_POOL
 export POOL_PATH
 export SUDO_PASSWORD
 
+# Source shared logging library
+LOGGING_SCRIPT="$PROJECT_ROOT/scripts/logging.sh"
+if [[ -f "$LOGGING_SCRIPT" ]]; then
+    source "$LOGGING_SCRIPT"
+fi
+
 # Source sudo helper functions
 SUDO_HELPER_SCRIPT="$STEP_DIR/00-sudo-helper.sh"
 if [[ -f "$SUDO_HELPER_SCRIPT" ]]; then
